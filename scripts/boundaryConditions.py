@@ -1,11 +1,15 @@
 # -*- coding: utf-8 -*-
-"""Assembly, load step, boundary conditions, and job creation."""
+"""Assembly, load step, boundary conditions, and job creation.
+
+Python 2.7 compatible. Imports explicit Abaqus modules so the script can run
+in noGUI mode without the interactive CAE session.
+"""
 from __future__ import print_function
 
 from abaqus import *
 from abaqusConstants import *
 
-# وارد کردن صریح ماژول‌های آباکوس برای اجرای بدون رابط گرافیکی
+import regionToolset
 import part
 import assembly
 import step
@@ -33,10 +37,9 @@ def setup_assembly_and_run(L=70.0, total_thickness=1.0, applied_strain=0.025,
     part_name = 'Specimen_Orphan' if 'Specimen_Orphan' in model.parts.keys() else 'Specimen'
     part = model.parts[part_name]
 
-# === اعمال جهت‌گیری متریال مستقیماً روی المان‌های شبکه مستقل ===
-    import regionToolset
-    # === اعمال جهت‌گیری سراسری متریال روی کل شبکه مستقل ===
-    import regionToolset
+    # === اعمال جهت‌گیری سراسری متریال روی المان‌های شبکه مستقل ===
+    # NOTE: this orientation applies to orphan-mesh elements (not faces).
+    # The face-level orientation is set separately in build_mesoscale_model.py.
     all_elements = part.elements
     part.MaterialOrientation(
         region=regionToolset.Region(elements=all_elements),
@@ -47,8 +50,7 @@ def setup_assembly_and_run(L=70.0, total_thickness=1.0, applied_strain=0.025,
         fieldName='',
         stackDirection=STACK_3
     )
-    # =======================================================
-    # ===============================================================
+    # ===========================================================
     if INSTANCE_NAME not in assembly.instances.keys():
         instance = assembly.Instance(name=INSTANCE_NAME, part=part, dependent=ON)
     else:
@@ -59,6 +61,10 @@ def setup_assembly_and_run(L=70.0, total_thickness=1.0, applied_strain=0.025,
                          initialInc=0.005, minInc=1.0e-12, maxInc=0.025,
                          maxNumInc=10000)
 
+    # ===============================================================
+    # تنظیمات خروجی میدانی (Field Output) — خروجی‌های عمومی برای کل قطعه
+    # شامل SDEG, STATUS, DMICRT برای ردیابی پیشرفت ترک در المان‌های کوهیزیو
+    # ===============================================================
     if 'F-Output-1' in model.fieldOutputRequests.keys():
         model.fieldOutputRequests['F-Output-1'].setValues(
             variables=('S', 'E', 'U', 'RF', 'SDEG', 'STATUS', 'DMICRT'))

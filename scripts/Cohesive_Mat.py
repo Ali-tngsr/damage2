@@ -13,6 +13,33 @@ COH_MAT_NAME = 'Cohesive_Mat'
 COH_SECTION_NAME = 'Cohesive_Sec'
 
 
+def create_stochastic_cohesive_materials(model, vf_field, n_cols,
+                                          fracture_energy=0.2,
+                                          penalty_stiffness=1.0e8):
+    """Create per-cell cohesive materials with spatially varied strength Y_T.
+
+    Restored from Ali-tngsr/Damage. Each (col, row) cell uses the local Y_T
+    of its assigned Vf, so crack initiation strength follows the stochastic
+    Vf field as required by the paper.
+    """
+    import mesoscale_common
+    for col_idx in range(n_cols):
+        for row_idx in range(5):
+            vf = vf_field[row_idx][col_idx]
+            props = mesoscale_common.get_properties(vf, units='MPa')
+            yt_local = props['YT']
+            mat_name = 'Coh_Mat_C%d_R%d' % (col_idx, row_idx)
+            if mat_name not in model.materials.keys():
+                material = model.Material(name=mat_name)
+                material.Elastic(type=TRACTION,
+                                 table=((penalty_stiffness, penalty_stiffness, penalty_stiffness),))
+                material.MaxsDamageInitiation(table=((yt_local, yt_local, yt_local),))
+                material.maxsDamageInitiation.DamageEvolution(
+                    type=ENERGY, softening=LINEAR,
+                    table=((fracture_energy,),))
+    print('Created %d stochastic cohesive materials.' % (n_cols * 5))
+
+
 def create_cohesive_material(model, strength=17.0, fracture_energy=0.2,
                              penalty_stiffness=1.0e8):
     """Create the baseline bilinear traction-separation cohesive material."""
