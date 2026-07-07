@@ -169,7 +169,7 @@ Each .cae contains geometry, partitions, mesh, materials, and edge sets —
 but NO cohesive elements yet. The pipeline will print clear instructions
 on what to do next.
 
-#### Phase B-2: MANUAL — Insert Cohesive Elements (manual, ~15 min per job)
+#### Phase B-2: MANUAL — Insert Cohesive Elements (manual, ~5 min per job)
 
 For each of the 3 .cae files:
 
@@ -180,19 +180,24 @@ For each of the 3 .cae files:
 
 2. Switch to Mesh module
 
-3. Run **Plug-ins → Insert Cohesive Layers** (or equivalent menu path):
-   - Part: `Specimen_Orphan`
-   - Element Set: `Potential_Crack_Edges`
-   - Cohesive Section: `Cohesive_Sec`
-   - Element Type: `COH2D4`
+3. Use **Mesh → Edit → Element → Create** to insert COH2D4 elements:
+   - Element type: COH2D4
+   - Section: `Cohesive_Sec` (already defined by pipeline)
+   - Selection: use the pre-built `Potential_Crack_Edges` set (or `Crack_Paths`)
+   - Abaqus will create zero-thickness cohesive elements along all selected edges
 
-4. Verify (see MANUAL_COHESIVE_WORKFLOW.md §6):
+4. Verify (see MANUAL_COHESIVE_WORKFLOW.md §5):
    - Element count increased by `5 × (n_cols - 1) = 695`
-   - Create set `CRACK_PATHS` containing all COH2D4 elements
+   - Create set `CRACK_PATHS` containing all COH2D4 elements (optional — pipeline
+     will auto-detect cohesive elements by type if missing)
 
 5. Save (Ctrl+S) and close CAE
 
 6. Repeat for `val_0902s.cae` and `val_0904s.cae`
+
+> **No plugin required!** This workflow uses only built-in Abaqus/CAE tools.
+> If you have the "Insert Cohesive Layers" plugin, you can use it instead —
+> see MANUAL_COHESIVE_WORKFLOW.md §4 for the faster plugin method.
 
 > **Detailed GUI screenshots and troubleshooting:**
 > see [`MANUAL_COHESIVE_WORKFLOW.md`](./MANUAL_COHESIVE_WORKFLOW.md)
@@ -405,21 +410,21 @@ After Phase D (ply thickness study):
 |-------|-----------------|-----------|---------|
 | Phase A — Setup | 30 min | 0.5 | ✅ (one-time) |
 | Phase B-1: BUILD validation (3 .cae) | 10 min | — | ❌ |
-| **Phase B-2: MANUAL cohesive insertion** | **~45 min** | **—** | **✅** |
+| **Phase B-2: MANUAL cohesive insertion** | **~15 min** | **—** | **✅** |
 | Phase B-3: RESUME + SUBMIT (3 jobs) | 3-4 hours | 12-16 | ❌ |
 | Phase B-4: POST-PROCESS | 10 min | — | ❌ |
 | Phase C-1: BUILD ply-number (1 .cae) | 5 min | — | ❌ |
-| **Phase C-2: MANUAL cohesive insertion** | **~15 min** | **—** | **✅** |
+| **Phase C-2: MANUAL cohesive insertion** | **~5 min** | **—** | **✅** |
 | Phase C-3: RESUME + SUBMIT (1 job) | 1-2 hours | 4-8 | ❌ |
 | Phase C-4: POST-PROCESS | 5 min | — | ❌ |
 | Phase D-1: BUILD thickness (4 .cae) | 15 min | — | ❌ |
-| **Phase D-2: MANUAL cohesive insertion** | **~60 min** | **—** | **✅** |
+| **Phase D-2: MANUAL cohesive insertion** | **~20 min** | **—** | **✅** |
 | Phase D-3: RESUME + SUBMIT (4 jobs) | 3-4 hours | 12-16 | ❌ |
 | Phase D-4: POST-PROCESS | 15 min | — | ❌ |
 | Phase E — Plot all figures | 5 min | — | ❌ |
 | Phase F — Manual screenshots (Figs. 4, 6, 7, 8) | 1 hour | — | ✅ |
 | Phase G — Report compilation | 30 min | — | ✅ |
-| **Total manual effort** | **~3 hours** | — | |
+| **Total manual effort** | **~2 hours** | — | |
 | **Total wall-clock** | **~10-13 hours over 4 days** | **~30-40 CPU-hours** | |
 
 ---

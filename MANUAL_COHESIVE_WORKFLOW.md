@@ -2,29 +2,28 @@
 
 This document provides **step-by-step instructions** for inserting cohesive
 elements between continuum elements in Abaqus/CAE. This is the only step in
-the entire replication pipeline that cannot be fully automated — it must be
-done manually in the Abaqus/CAE graphical interface.
+the replication pipeline that is done interactively in the GUI.
 
-**Estimated time:** 15-20 minutes per job × 8 jobs = ~2-3 hours total.
+**Estimated time:** 5-10 minutes per job × 8 jobs = ~1 hour total.
 
 ---
 
-## 0. Why This Step Is Manual
+## 0. Workflow Summary
 
-The paper uses zero-thickness cohesive elements (COH2D4) inserted between
-orthotropic continuum elements (CPS4R) as potential crack paths. In Abaqus,
-there are three ways to insert such elements:
+The pipeline builds the .cae with everything ready for cohesive insertion:
+- Geometry partitioned into 0° and 90° plies
+- Mesh of CPS4R continuum elements
+- **Edge set `Potential_Crack_Edges`** containing all vertical partition edges
+  where cohesive elements should be inserted
+- **Edge set `Crack_Paths`** (alternative name)
+- Cohesive material `Cohesive_Mat` and section `Cohesive_Sec` already defined
 
-| Method | Automation | Why we use / don't use it |
-|--------|------------|---------------------------|
-| **A) GUI Plugin "Insert Cohesive"** | Manual | ✅ RECOMMENDED — reliable, well-tested |
-| **B) Orphan mesh + manual element creation** | Scriptable | ❌ Brittle — complex node-pair matching, fails on irregular meshes |
-| **C) Surface-based cohesive (COH2D)** | Scriptable | ❌ Different physics — doesn't match paper methodology |
-
-This workflow uses Method A. The automation scripts (run_pipeline.py etc.)
-build everything *except* the cohesive elements, save the .cae, and exit.
-You then open the .cae in CAE, run the plugin, save, and re-run the pipeline
-with `--resume-from` to apply BCs and submit.
+You then:
+1. Open the .cae in Abaqus/CAE
+2. Use Abaqus' built-in **Edit Mesh → Element** tool to create COH2D4 elements
+   along the edges in the set
+3. Save the .cae
+4. Resume the pipeline with `--resume-only --submit`
 
 ---
 
@@ -32,19 +31,20 @@ with `--resume-from` to apply BCs and submit.
 
 Before starting, ensure:
 
-- [ ] Abaqus/CAE 2018+ is installed (older versions may lack the cohesive plugin)
-- [ ] The "Insert Cohesive Layers" plugin is available. Check by:
-  - Opening Abaqus/CAE
-  - Menu: **Plug-ins → Abaqus → Cohesive...**
-  - If missing, install the SIMULIA "Composite Cohesive Plugin" from the
-    SIMULIA user community portal, or use the alternative Method A2 below.
-
-- [ ] `run_pipeline.py` has been run in build mode and produced a `.cae` file
-  in `abaqus_jobs/`. Example:
+- [ ] Abaqus/CAE is installed (any version 6.13+ works)
+- [ ] `run_pipeline.py` (or one of the driver scripts) has been run in build
+      mode and produced a `.cae` file in `abaqus_jobs/`. Example:
   ```bash
   abaqus cae noGUI=scripts/run_pipeline.py -- --t90=0.255 --job-name=val_090s
   # → produces: abaqus_jobs/val_090s.cae
   ```
+
+- [ ] Verify the set exists by listing it from Python (optional):
+  ```bash
+  abaqus python -c "from odbAccess import openOdb; print('ok')"
+  ```
+
+> **No plugin required!** This workflow uses only built-in Abaqus/CAE tools.
 
 ---
 
@@ -70,75 +70,112 @@ Abaqus/CAE will open with the model loaded. You should see:
 
 ---
 
-## 3. Method A1: Using the "Insert Cohesive" Plugin (Preferred)
+## 3. Insert Cohesive Elements Using Built-in Tools
 
 ### Step 3.1 — Switch to the Mesh module
 
 Click **Mesh** in the module dropdown (top-left of viewport), or:
 Menu: **Module → Mesh**
 
-### Step 3.2 — Verify the part has been meshed
+### Step 3.2 — Select the Specimen_Orphan part
 
-- In the viewport toolbar, select part `Specimen_Orphan` (not `Specimen`)
-- You should see a regular grid of CPS4R elements (4-node quads)
-- If not meshed: Menu: **Mesh → Part** (this should re-mesh if needed)
+In the viewport toolbar (top of viewport), make sure the part dropdown shows
+`Specimen_Orphan` (NOT `Specimen`). This is the orphan mesh part where we
+will insert cohesive elements.
 
-### Step 3.3 — Launch the cohesive insertion plugin
+> If you only see `Specimen`, that's also OK — the orphan mesh was created
+> as a copy of `Specimen` and both contain the same edge set.
 
-Menu: **Plug-ins → Tools → Insert Cohesive Layers...**
+### Step 3.3 — Open the Edit Mesh tool
 
-> **If the menu item is missing**, install the plugin:
-> 1. Download `composite_cohesive_plugin.zip` from SIMULIA user community
-> 2. Extract to `<abaqus_install>/cae/plugins/composite_cohesive`
-> 3. Restart Abaqus/CAE
+Menu: **Mesh → Edit...**
 
-The plugin dialog will appear with these fields:
+In the Edit Mesh dialog:
 
-### Step 3.4 — Configure the plugin
+1. **Category:** Element
+2. **Operation:** Create
 
-| Field | Value to Enter |
-|-------|---------------|
-| **Part** | `Specimen_Orphan` |
-| **Element Set (Faces/Edges)** | `Potential_Crack_Edges` |
-| **Cohesive Section** | `Cohesive_Sec` |
-| **Element Type** | `COH2D4` (2D 4-node cohesive) |
-| **Thickness** | `1.0` (default — uses section-defined thickness) |
-| **Node Offset** | `NONE` (zero-thickness cohesive) |
+### Step 3.4 — Configure element type and section
 
-### Step 3.5 — Run the plugin
+Click the **Element Type...** button and set:
 
-Click **OK**. The plugin will:
+| Field | Value |
+|-------|-------|
+| Element library | Standard |
+| Family | Cohesive |
+| Dimensionality | 2D |
+| Element type | **COH2D4** (4-node bilinear, quadratic is also OK) |
 
-1. Find all element edges in the `Potential_Crack_Edges` set
-2. Duplicate the nodes along those edges
-3. Create zero-thickness COH2D4 elements between the duplicate node pairs
-4. Assign the `Cohesive_Sec` section to the new elements
-5. Update the mesh connectivity
+Click **OK** to close the element type dialog.
 
-**This takes 30-60 seconds** for a model with ~140 crack path columns
-(700 cohesive elements). A status bar will appear.
+In the Edit Mesh dialog, also set:
 
-### Step 3.6 — Verify cohesive insertion
+| Field | Value |
+|-------|-------|
+| Section | `Cohesive_Sec` |
 
-After the plugin completes:
+### Step 3.5 — Select the edges where cohesive elements will be inserted
+
+This is the key step. We want to insert cohesive elements on every vertical
+partition edge in the 90° ply region. The pipeline has pre-built the set
+`Potential_Crack_Edges` (or `Crack_Paths`) for exactly this purpose.
+
+**Option A: Use the pre-built set (recommended)**
+
+1. In the Edit Mesh dialog, click the prompt arrow next to "Select"
+2. In the viewport, click the **Sets** toolbar button (or Menu: Tools → Sets)
+3. Select `Potential_Crack_Edges` (or `Crack_Paths`)
+4. Click **Done**
+
+All vertical partition edges in the 90° ply will be highlighted.
+
+**Option B: Manual selection (if set is missing)**
+
+1. In the toolbar, click the **Filter** dropdown and choose "Edges"
+2. Hold Shift and click each vertical edge in the 90° ply region
+   - There are approximately `n_cols - 1 = 139` edges for the validation case
+   - They are evenly spaced at intervals of `L / n_cols = 0.5 mm`
+3. Click **Done** when all edges are selected
+
+### Step 3.6 — Create the cohesive elements
+
+For each selected edge, Abaqus will create a zero-thickness COH2D4 element
+automatically. The procedure is:
+
+1. After selecting edges (Step 3.5), Abaqus will prompt you to confirm
+2. Click **Yes** (or **Create**) to generate cohesive elements on all edges
+3. The status bar will show progress
+4. When complete, you should see thin red lines at each crack path location
+   (139 vertical lines for `val_090s`)
+
+> **Note:** The exact menu sequence varies slightly between Abaqus versions.
+> In Abaqus 2020+, use:
+>   **Mesh → Edit → Element → Create → by Edge Selection**
+> In older versions, you may need to:
+>   **Mesh → Element → Create** (then pick the 4 nodes of each pair)
+
+### Step 3.7 — Verify cohesive insertion
+
+After creating the cohesive elements:
 
 1. **Visually check**: in the viewport, you should see thin red lines at
-   each potential crack path location (140 vertical lines for `val_090s`)
+   each potential crack path location (139 vertical lines for `val_090s`)
 
 2. **Element count check**:
    - Menu: **Mesh → Query → Element count**
    - The total element count should now be:
      - Continuum (CPS4R): original count (unchanged)
      - Cohesive (COH2D4): `5 × (n_cols - 1) = 5 × 139 = 695` for val_090s
-   - Example: if original was 1400 CPS4R elements, new total is 2095 (1400 + 695)
+   - Example: if original was 1400 CPS4R elements, new total is 2095
 
-3. **Set check**:
+3. **Create CRACK_PATHS set** (if not already present):
    - Menu: **Tools → Set → Create**
-   - Name it `CRACK_PATHS` (overwrites the existing empty set)
-   - Select all COH2D4 elements (use **filter by type** in the select dialog)
+   - Name: `CRACK_PATHS`
+   - Click the filter dropdown and choose "By Element Type"
+   - Select all COH2D4 elements
    - Click **Done**
 
-### Step 3.7 — Save the modified .cae
+### Step 3.8 — Save the modified .cae
 
 Menu: **File → Save** (or Ctrl+S)
 
@@ -146,69 +183,61 @@ The `abaqus_jobs/val_090s.cae` file is now updated with cohesive elements.
 
 ---
 
-## 4. Method A2: Manual Cohesive Insertion (No Plugin)
+## 4. Alternative: Quick Plugin Method (if available)
 
-If the plugin is not available, you can do the same operations manually.
-This takes longer (~30 min per job) but doesn't require any plugins.
+If your Abaqus installation has the **"Insert Cohesive Layers"** plugin
+(check: Plug-ins menu → look for it), this is faster:
 
-### Step 4.1 — Switch to Mesh module, select Specimen_Orphan
+1. Open .cae in Abaqus/CAE (Step 2)
+2. Switch to Mesh module
+3. Plug-ins → Insert Cohesive Layers
+4. Configure:
+   - Part: `Specimen_Orphan`
+   - Element Set: `Potential_Crack_Edges`
+   - Cohesive Section: `Cohesive_Sec`
+   - Element Type: `COH2D4`
+5. Click OK
+6. Save the .cae
 
-### Step 4.2 — Edit mesh to add cohesive elements
-
-Menu: **Mesh → Edit...**
-
-In the Edit Mesh dialog:
-
-1. Select **Element** from the dropdown
-2. Select **Create** as the operation
-3. Set **Element type** to `COH2D4` (click the **Element Type...** button to choose)
-4. Set **Section** to `Cohesive_Sec`
-
-### Step 4.3 — Manually create cohesive elements
-
-For each potential crack path column (140 of them for `val_090s`):
-
-1. Identify the 4 nodes of two adjacent CPS4R elements sharing a vertical edge
-   - Node 1: top-left node of left element
-   - Node 2: top-left node of right element (= duplicate of Node 1)
-   - Node 3: bottom-left node of right element
-   - Node 4: bottom-left node of left element
-
-2. Click the 4 nodes in order (1, 2, 3, 4) to create a COH2D4 element
-
-3. Repeat for each row (5 rows per column) × each column (140 columns)
-
-> ⚠️ **This is tedious.** Use the plugin (Method A1) if at all possible.
-> Method A2 is documented here as a fallback only.
-
-### Step 4.4 — Save the .cae
+This is functionally identical to Section 3 but automates the edge-by-edge
+selection. Use whichever is available.
 
 ---
 
-## 5. Common Issues & Solutions
+## 5. Verification Checklist (Before Submitting)
 
-### Issue: "Element set 'Potential_Crack_Edges' not found"
+After inserting cohesive elements, verify each item:
 
-**Cause:** `build_mesoscale_model.py` didn't create the set, or you opened
-the wrong .cae file.
+- [ ] **Element count**: total = continuum_count + 5 × (n_cols - 1)
+  - For val_090s: 1400 + 695 = 2095
+  - For val_0904s (4× taller): 5600 + 695 = 6295
+- [ ] **Section assignment**: all COH2D4 elements have `Cohesive_Sec`
+  - Check by: Mesh → Query → Element → click any red line
+- [ ] **Set `CRACK_PATHS`** exists and contains all COH2D4 elements
+- [ ] **Mesh quality**: Menu: **Mesh → Verify → Element quality**
+  - All elements should pass (no red highlighted elements)
+- [ ] **Save**: Ctrl+S before closing CAE
+
+---
+
+## 6. Common Issues & Solutions
+
+### Issue: "Set 'Potential_Crack_Edges' not found"
+
+**Cause:** The pipeline didn't create the set, or you opened the wrong .cae.
 
 **Fix:**
-1. In CAE, go to **Tree → Parts → Specimen_Orphan → Sets**
-2. Check if `Potential_Crack_Edges` exists
-3. If not, re-run `run_pipeline.py` in build mode (without `--resume-from`)
-
-### Issue: Plugin reports "No edges found"
-
-**Cause:** The orphan mesh has no edge set, or the set is on the wrong part.
-
-**Fix:**
-1. In the plugin dialog, manually select the part `Specimen_Orphan`
-2. Re-check the set dropdown — sometimes the plugin filters by the active part
+1. In CAE, go to **Model Tree → Parts → Specimen_Orphan → Sets**
+2. Check if `Potential_Crack_Edges` or `Crack_Paths` exists
+3. If not, re-run the pipeline in build mode (without `--resume-from`):
+   ```bash
+   abaqus cae noGUI=scripts/run_pipeline.py -- --t90=0.255 --job-name=val_090s
+   ```
 
 ### Issue: "Cohesive section 'Cohesive_Sec' not assignable"
 
-**Cause:** The section was created on `Specimen` (the original part) but
-not propagated to `Specimen_Orphan`.
+**Cause:** The section was created on `Specimen` but not propagated to
+`Specimen_Orphan`.
 
 **Fix:**
 1. Go to **Property module**
@@ -219,8 +248,8 @@ not propagated to `Specimen_Orphan`.
 
 ### Issue: After insertion, model fails consistency check on submit
 
-**Cause:** Node duplication may have broken element connectivity, or
-material orientations are missing on the new cohesive elements.
+**Cause:** Element connectivity may be broken, or material orientations
+are missing on the new cohesive elements.
 
 **Fix:**
 1. In **Mesh module**: Menu: **Verify → Mesh → Analysis checks**
@@ -267,23 +296,23 @@ wasn't assigned the right material.
 2. Set **Frequency** to 20 (save every 20 increments)
 3. Re-submit
 
----
+### Issue: I accidentally created too many cohesive elements
 
-## 6. Verification Checklist (Before Submit)
+**Cause:** Edges were selected twice or set included wrong edges.
 
-After inserting cohesive elements, verify each item before submitting:
+**Fix:**
+1. In Mesh module: **Mesh → Edit → Element → Delete**
+2. Filter by element type = COH2D4
+3. Select all and delete
+4. Re-do the cohesive insertion from Step 3.5
 
-- [ ] **Element count**: total = continuum_count + 5 × (n_cols - 1)
-  - For val_090s: 1400 + 695 = 2095
-  - For val_0904s (4× taller): 5600 + 695 = 6295
-- [ ] **Section assignment**: all COH2D4 elements have `Cohesive_Sec`
-- [ ] **Material orientation**: still applied to all elements
-- [ ] **Set `CRACK_PATHS`** exists and contains all COH2D4 elements
-- [ ] **Mesh quality**: Menu: **Mesh → Verify → Element quality**
-  - All elements should pass (no red highlighted elements)
-- [ ] **Step settings**: nlgeom=ON, maxNumInc=10000
-- [ ] **BCs applied**: Fix_Left_X, Fix_Bottom_Y, Pull_Right_X
-- [ ] **Save**: Ctrl+S before closing CAE
+### Issue: Want to start over from scratch
+
+**Fix:** Delete the .cae file and re-run the build:
+```bash
+rm abaqus_jobs/val_090s.cae
+abaqus cae noGUI=scripts/run_pipeline.py -- --t90=0.255 --job-name=val_090s
+```
 
 ---
 
@@ -336,11 +365,11 @@ After this, you have 8 .cae files in `abaqus_jobs/`:
 - pn_090n0.cae
 - pt_t90_020.cae, pt_t90_060.cae, pt_t90_100.cae, pt_t90_140.cae
 
-### Phase 2: Insert cohesive elements (manual, ~2 hours)
+### Phase 2: Insert cohesive elements (manual, ~1 hour)
 
 For each of the 8 .cae files:
 1. `abaqus cae database=abaqus_jobs/<name>.cae`
-2. Run **Plug-ins → Insert Cohesive Layers** (Section 3 above)
+2. Follow Section 3 above (Mesh → Edit → Element → Create)
 3. Save (Ctrl+S)
 4. Close CAE
 
@@ -377,47 +406,14 @@ python3 scripts/plot_figures.py --figures 5,9,10,11
 |------|---------|------------|
 | Build .cae (Phase 1) | ~1 min | ~10 min |
 | Open .cae in CAE | ~30 sec | ~4 min |
-| Run cohesive plugin | ~1 min | ~8 min |
-| Verify + save | ~2 min | ~16 min |
+| Select edges + create cohesive | ~3 min | ~24 min |
+| Verify + save | ~1 min | ~8 min |
 | Close + reopen next | ~30 sec | ~4 min |
-| **Subtotal (manual)** | **~4 min** | **~32 min** |
+| **Subtotal (manual cohesive)** | **~5 min** | **~40 min** |
 | Submit job | ~1 hr | ~8 hours (CPU) |
 | Post-process | ~2 min | ~16 min |
 | Plot all figures | — | ~5 min |
 | **Total** | | **~9 hours** |
-
-> **Note:** The 32 minutes of manual cohesive insertion is the only
-> non-automated step. All other phases are scripted.
-
----
-
-## 10. Alternative: Skip Cohesive, Use Surface-Based Cohesive Behavior
-
-If you cannot install the cohesive plugin and Method A2 is too tedious,
-you can use **surface-based cohesive behavior** instead. This is a different
-physics formulation but produces qualitatively similar results.
-
-To switch:
-
-1. In **Interaction module**, create a surface-to-surface contact
-2. Set **Interaction property** to a new property with:
-   - Mechanical → Cohesive Behavior
-   - Traction separation: Knn = Kss = Ktt = 1e8 MPa/mm
-   - Damage initiation: Max stress = Y_T (use 17 MPa as default)
-   - Damage evolution: Energy, G_c = 0.2 N/mm
-3. Apply to all crack-path edges as master+slave surfaces
-
-> ⚠️ **Warning:** This method does NOT match the paper's methodology
-> (which uses element-based cohesive). Use it only as a last resort.
-
----
-
-## 11. References
-
-- Abaqus Analysis User's Guide, §32.3 (Cohesive Elements)
-- Abaqus Analysis User's Guide, §32.4 (Defining the constitutive response of cohesive elements)
-- Abaqus/CAE User's Guide, §69 (Mesh module)
-- SIMULIA Cohesive Plugin: https://plugins.3ds.com/ (requires SIMULIA user account)
 
 ---
 

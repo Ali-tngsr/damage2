@@ -18,8 +18,8 @@ This repository is a refactored fork of `Ali-tngsr/Damage`. All Abaqus scripts a
 
 The pipeline operates in **manual cohesive insertion mode** (`COHESIVE_INSERTION_MODE = 'manual'` in `config.py`):
 
-1. **BUILD** (automated): `run_pipeline.py` produces a `.cae` with geometry, mesh, materials, and edge sets — but NO cohesive elements.
-2. **MANUAL** (CAE GUI): User opens `.cae` in Abaqus/CAE and uses the "Insert Cohesive Layers" plugin to add COH2D4 elements. See `MANUAL_COHESIVE_WORKFLOW.md`.
+1. **BUILD** (automated): `run_pipeline.py` produces a `.cae` with geometry, mesh, materials, and edge sets. The `Potential_Crack_Edges` set contains all the vertical partition edges where cohesive elements should be inserted.
+2. **MANUAL** (CAE GUI): User opens `.cae` in Abaqus/CAE and uses the built-in **Mesh → Edit → Element → Create** tool to insert COH2D4 elements along the edges in the set. The cohesive material (`Cohesive_Mat`) and section (`Cohesive_Sec`) are already pre-defined by the pipeline. See `MANUAL_COHESIVE_WORKFLOW.md` for the step-by-step guide (~5 min per job).
 3. **RESUME** (automated): Re-run with `--resume-only --submit` to apply BCs and submit the job.
 4. **POST** (automated): `postprocess_odb.py` extracts stress/strain/crack data to CSV; `plot_figures.py` produces publication figures.
 
