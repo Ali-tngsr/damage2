@@ -29,11 +29,42 @@ def _delete_set_if_exists(assembly, set_name):
 
 
 def setup_assembly_and_run(L=70.0, total_thickness=1.0, applied_strain=0.025,
-                           job_name=JOB_NAME):
+                           job_name=JOB_NAME, skip_if_exists=False):
+    """Set up assembly, BCs, step, and job.
+
+    Parameters
+    ----------
+    L : float
+        Specimen gauge length (mm).
+    total_thickness : float
+        Total laminate thickness (mm) — used for BC node selection.
+    applied_strain : float
+        Max applied engineering strain (default 0.025 = 2.5%).
+    job_name : str
+        Abaqus job name.
+    skip_if_exists : bool
+        If True, skip assembly/step/BC creation if they already exist
+        (used when resuming from a manually-edited .cae file).
+    """
     model = mdb.models[MODEL_NAME]
     assembly = model.rootAssembly
+
+    # If resuming from a manually-edited .cae (cohesive elements already
+    # inserted by user), the assembly/BCs may already exist — skip them.
+    if skip_if_exists and INSTANCE_NAME in assembly.instances.keys():
+        print('Assembly already exists (resume mode) — skipping setup.')
+        if job_name not in mdb.jobs.keys():
+            mdb.Job(name=job_name, model=MODEL_NAME,
+                    description='Mesoscale transverse cracking simulation',
+                    numCpus=4, numDomains=4)
+        print('Job created: %s' % job_name)
+        return
+
     assembly.DatumCsysByDefault(CARTESIAN)
 
+    # Prefer orphan mesh if it exists (created by OrphanMesh.make_orphan_mesh).
+    # In manual mode, the user may have also added cohesive elements directly
+    # to the orphan mesh part.
     part_name = 'Specimen_Orphan' if 'Specimen_Orphan' in model.parts.keys() else 'Specimen'
     part = model.parts[part_name]
 
@@ -67,7 +98,8 @@ def setup_assembly_and_run(L=70.0, total_thickness=1.0, applied_strain=0.025,
     # ===============================================================
     if 'F-Output-1' in model.fieldOutputRequests.keys():
         model.fieldOutputRequests['F-Output-1'].setValues(
-            variables=('S', 'E', 'U', 'RF', 'SDEG', 'STATUS', 'DMICRT'))
+            variables=('S', 'E', 'U', 'RF', 'SDEG', 'STATUS', 'DMICRT'),
+            frequency=20)  # save every 20 increments (controls ODB size)
 
     tol = 1.0e-4
     # تغییر از edges به nodes به دلیل استفاده از Orphan Mesh

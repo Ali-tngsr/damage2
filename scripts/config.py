@@ -43,6 +43,21 @@ DEFAULT_SEED = 2026              # random seed for stochastic Vf field
 DEFAULT_ELEMENT_SIZE = 0.125     # mm — mesoscale mesh element size
 
 # =============================================================================
+# Cohesive insertion mode — controls how cohesive elements are placed
+# =============================================================================
+# 'manual' : (RECOMMENDED for paper replication)
+#            The pipeline stops after building geometry + mesh + edge sets.
+#            User opens the .cae in Abaqus/CAE and inserts cohesive elements
+#            via the GUI plugin, then re-runs with --resume-from=<cae path>.
+#            See MANUAL_COHESIVE_WORKFLOW.md for step-by-step instructions.
+#
+# 'auto'   : (EXPERIMENTAL — not yet implemented)
+#            OrphanMesh.py would auto-insert COH2D4 elements between
+#            coincident nodes. This requires complex node-pair matching
+#            logic and is brittle. Use 'manual' for now.
+COHESIVE_INSERTION_MODE = 'manual'
+
+# =============================================================================
 # Vf distribution rules (paper §2.2 — spatial Vf assignment)
 # =============================================================================
 VF_RANGES = {

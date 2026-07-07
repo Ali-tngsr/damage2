@@ -11,7 +11,17 @@
 
 This repository is a refactored fork of `Ali-tngsr/Damage`. All Abaqus scripts are Python 2.7 compatible.
 
-> **See [`ROADMAP.md`](./ROADMAP.md)** for the full plan to reproduce all 11 paper figures, including which steps are automated vs. manual.
+> **See [`ROADMAP.md`](./ROADMAP.md)** for the full plan to reproduce all 11 paper figures.
+> **See [`MANUAL_COHESIVE_WORKFLOW.md`](./MANUAL_COHESIVE_WORKFLOW.md)** for the step-by-step Abaqus/CAE GUI guide on inserting cohesive elements (the only non-automated step).
+
+### Workflow Mode
+
+The pipeline operates in **manual cohesive insertion mode** (`COHESIVE_INSERTION_MODE = 'manual'` in `config.py`):
+
+1. **BUILD** (automated): `run_pipeline.py` produces a `.cae` with geometry, mesh, materials, and edge sets — but NO cohesive elements.
+2. **MANUAL** (CAE GUI): User opens `.cae` in Abaqus/CAE and uses the "Insert Cohesive Layers" plugin to add COH2D4 elements. See `MANUAL_COHESIVE_WORKFLOW.md`.
+3. **RESUME** (automated): Re-run with `--resume-only --submit` to apply BCs and submit the job.
+4. **POST** (automated): `postprocess_odb.py` extracts stress/strain/crack data to CSV; `plot_figures.py` produces publication figures.
 
 ```
 damage2/
@@ -47,31 +57,52 @@ damage2/
 
 ### Quick Start
 
+The pipeline runs in **4 phases** per job batch (BUILD → MANUAL → RESUME → POST):
+
 ```bash
-# 1. Generate preview CSVs (no Abaqus required)
-python scripts/run_all.py
+# Phase A: Setup (one-time)
+python scripts/run_all.py                              # sanity-check preview CSVs
+python3 scripts/digitize_experimental.py --template    # create exp data template
 
-# 2. Run the full Abaqus pipeline (single job)
-abaqus cae noGUI=scripts/run_pipeline.py -- --submit
+# Phase B: Validation sims (Figs. 5, 6, 8)
+abaqus cae noGUI=scripts/run_validation_sims.py -- --no-submit
+# ↑ produces 3 .cae files (no cohesive elements yet)
 
-# 3. Run all 3 validation sims (Fig. 5)
-abaqus cae noGUI=scripts/run_validation_sims.py -- --submit
+# Phase B-MANUAL: Insert cohesive elements in Abaqus/CAE GUI
+abaqus cae database=abaqus_jobs/val_090s.cae           # open in CAE
+# Use Plug-ins → Insert Cohesive Layers (see MANUAL_COHESIVE_WORKFLOW.md)
+# Save the .cae (Ctrl+S), close CAE
+# Repeat for val_0902s.cae, val_0904s.cae
 
-# 4. Run ply number study (Fig. 9, 11a) — also needs validation sims
-abaqus cae noGUI=scripts/run_ply_number_study.py -- --submit
+# Phase B-RESUME: Submit all validation jobs
+abaqus cae noGUI=scripts/run_validation_sims.py -- --resume-only --submit
 
-# 5. Run ply thickness study (Fig. 10, 11b) — 4 jobs
-abaqus cae noGUI=scripts/run_ply_thickness_study.py -- --submit
+# Phase B-POST: Extract results
+for job in val_090s val_0902s val_0904s; do
+    abaqus python scripts/postprocess_odb.py \
+        --odb abaqus_jobs/${job}.odb --job-name ${job}
+done
 
-# 6. Post-process each .odb file (one per job)
-abaqus python scripts/postprocess_odb.py --odb abaqus_jobs/val_090s.odb --job-name val_090s
+# Phase C: Ply number study (Figs. 9, 11a) — same BUILD/MANUAL/RESUME/POST pattern
+abaqus cae noGUI=scripts/run_ply_number_study.py -- --no-submit
+abaqus cae database=abaqus_jobs/pn_090n0.cae           # MANUAL: insert cohesive
+abaqus cae noGUI=scripts/run_ply_number_study.py -- --resume-only --submit
+abaqus python scripts/postprocess_odb.py --odb abaqus_jobs/pn_090n0.odb --job-name pn_090n0
 
-# 7. Digitize experimental data from paper Fig. 5 (one-time setup)
-python3 scripts/digitize_experimental.py --template
-# ... then edit data/experimental_fig5.csv with values from WebPlotDigitizer
+# Phase D: Ply thickness study (Figs. 10, 11b) — 4 jobs
+abaqus cae noGUI=scripts/run_ply_thickness_study.py -- --no-submit
+# MANUAL: insert cohesive in all 4 .cae files (pt_t90_020, _060, _100, _140)
+abaqus cae noGUI=scripts/run_ply_thickness_study.py -- --resume-only --submit
+for job in pt_t90_020 pt_t90_060 pt_t90_100 pt_t90_140; do
+    abaqus python scripts/postprocess_odb.py \
+        --odb abaqus_jobs/${job}.odb --job-name ${job}
+done
 
-# 8. Plot all figures
+# Phase E: Plot all figures
 python3 scripts/plot_figures.py --figures 5,9,10,11
+
+# Phase F: Manual screenshots in Abaqus/CAE for Figs. 4, 6, 7, 8
+# (see ROADMAP.md §3 Phase F)
 ```
 
 ### Reproducing the Paper — 8 Jobs Summary

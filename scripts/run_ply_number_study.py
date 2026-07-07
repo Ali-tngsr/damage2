@@ -45,18 +45,21 @@ def _parse_args(argv):
     for arg in user_args:
         if arg.startswith('--seed='):
             seed = int(arg[len('--seed='):])
-    return submit, save_cae, seed
+    resume_only = '--resume-only' in user_args
+    return submit, save_cae, seed, resume_only
 
 
 def main():
-    submit, save_cae, seed = _parse_args(sys.argv)
+    submit, save_cae, seed, resume_only = _parse_args(sys.argv)
 
     print('=' * 70)
     print('PLY NUMBER STUDY — paper Fig. 9 + 11a')
     print('=' * 70)
     print('New jobs:    %s' % ', '.join(PLY_NUMBER_NEW_JOBS))
     print('Reuse jobs:  %s (run validation sims first!)' % ', '.join(PLY_NUMBER_REUSE))
-    print('Submit: %s | Save CAE: %s | Seed: %d' % (submit, save_cae, seed))
+    print('Submit: %s | Save CAE: %s | Seed: %d | Resume-only: %s' % (
+        submit, save_cae, seed, resume_only))
+    print('Cohesive mode: %s' % config.COHESIVE_INSERTION_MODE)
     print('=' * 70)
 
     for i, job_name in enumerate(PLY_NUMBER_NEW_JOBS, 1):
@@ -66,33 +69,62 @@ def main():
             continue
 
         print()
-        print('[%d/%d] Building job: %s (%s)' % (
+        print('[%d/%d] Processing job: %s (%s)' % (
             i, len(PLY_NUMBER_NEW_JOBS), job_name, job['layup']))
 
-        run_pipeline(
-            L=config.GAUGE_LENGTH_MM,
-            t_0=job['t0_mm'],
-            t_90=job['t90_mm'],
-            rho_sat=job['rho_sat'],
-            seed=seed,
-            element_size=config.DEFAULT_ELEMENT_SIZE,
-            applied_strain=config.MAX_ENGINEERING_STRAIN,
-            make_orphan=True,
-            save_cae=save_cae,
-            submit_job=submit,
-            job_name=job_name,
-        )
+        if resume_only:
+            cae_path = os.path.join(REPO_DIR, 'abaqus_jobs', job_name + '.cae')
+            if not os.path.exists(cae_path):
+                print('  WARNING: %s not found — skipping' % cae_path)
+                continue
+            print('  Resuming from: %s' % cae_path)
+            run_pipeline(
+                t_0=job['t0_mm'],
+                t_90=job['t90_mm'],
+                rho_sat=job['rho_sat'],
+                seed=seed,
+                applied_strain=config.MAX_ENGINEERING_STRAIN,
+                save_cae=save_cae,
+                submit_job=submit,
+                job_name=job_name,
+                resume_from=cae_path,
+            )
+        else:
+            run_pipeline(
+                L=config.GAUGE_LENGTH_MM,
+                t_0=job['t0_mm'],
+                t_90=job['t90_mm'],
+                rho_sat=job['rho_sat'],
+                seed=seed,
+                element_size=config.DEFAULT_ELEMENT_SIZE,
+                applied_strain=config.MAX_ENGINEERING_STRAIN,
+                make_orphan=True,
+                save_cae=save_cae,
+                submit_job=submit,
+                job_name=job_name,
+            )
 
     print()
     print('=' * 70)
-    print('PLY NUMBER STUDY COMPLETE')
+    print('PLY NUMBER STUDY — PHASE COMPLETE')
     print('=' * 70)
-    print()
-    print('To produce Fig. 9 + 11a, also post-process these reused jobs:')
-    for j in PLY_NUMBER_REUSE:
-        print('  abaqus python scripts/postprocess_odb.py --odb abaqus_jobs/%s.odb' % j)
-    print()
-    print('Then run: python3 scripts/plot_figures.py --figures 9,11a')
+    if not resume_only and config.COHESIVE_INSERTION_MODE == 'manual':
+        print()
+        print('NEXT STEPS (manual cohesive insertion):')
+        print('  1. Open .cae in Abaqus/CAE:')
+        for j in PLY_NUMBER_NEW_JOBS:
+            print('       abaqus cae database=abaqus_jobs/%s.cae' % j)
+        print('  2. Follow MANUAL_COHESIVE_WORKFLOW.md')
+        print('  3. Save each .cae file')
+        print('  4. Resume and submit:')
+        print('       abaqus cae noGUI=scripts/run_ply_number_study.py -- --resume-only --submit')
+    else:
+        print()
+        print('To produce Fig. 9 + 11a, also post-process these reused jobs:')
+        for j in PLY_NUMBER_REUSE:
+            print('  abaqus python scripts/postprocess_odb.py --odb abaqus_jobs/%s.odb --job-name %s' % (j, j))
+        print()
+        print('Then run: python3 scripts/plot_figures.py --figures 9,11a')
 
 
 if __name__ == '__main__':
