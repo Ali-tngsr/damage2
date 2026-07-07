@@ -11,25 +11,35 @@
 
 This repository is a refactored fork of `Ali-tngsr/Damage`. All Abaqus scripts are Python 2.7 compatible.
 
+> **See [`ROADMAP.md`](./ROADMAP.md)** for the full plan to reproduce all 11 paper figures, including which steps are automated vs. manual.
+
 ```
 damage2/
 ├── README.md                       # This document
+├── ROADMAP.md                      # Full reproduction plan (automated vs manual steps)
 ├── data/
-│   └── table1_properties.csv       # Homogenized properties for Vf = 0..90%
+│   ├── table1_properties.csv       # Homogenized properties for Vf = 0..90%
+│   ├── table1_transcribed.csv      # Sanity-check artifact from run_all.py
+│   └── experimental_fig5.csv       # Digitized experimental data (template, edit via digitize_experimental.py)
 ├── scripts/
-│   ├── config.py                   # Central configuration (geometry, layups, mesh)
+│   ├── config.py                   # Central config + JOBS registry (8 jobs to reproduce paper)
 │   ├── material_table.py           # Table 1 data + interpolation helpers
 │   ├── material_interp.py          # Property interpolation (numpy + pure-python)
 │   ├── vf_field.py                 # Stochastic Vf field generator
 │   ├── mesoscale_common.py         # Shared helpers (assign_vf_field, get_properties, safe_name)
 │   ├── build_mesoscale_model.py    # Build geometry, partitions, materials, edge sets
-│   ├── Cohesive_Mat.py             # Cohesive material/section + continuum mesh
+│   ├── Cohesive_Mat.py             # Cohesive material/section + continuum mesh + stochastic variant
 │   ├── Cohesive_Mat2.py            # Crack-path set creation
 │   ├── OrphanMesh.py               # Convert to orphan mesh
 │   ├── boundaryConditions.py       # Assembly, BCs, step, job creation
-│   ├── postprocess_odb.py          # ODB extraction (stress, strain, SDEG, cracks)
-│   ├── plot_results.py             # Matplotlib plotting helpers
-│   ├── run_pipeline.py             # End-to-end Abaqus driver (CLI args supported)
+│   ├── postprocess_odb.py          # Full ODB extraction (σ90, E90, crack density, etc.)
+│   ├── plot_results.py             # Basic matplotlib helper (single job)
+│   ├── plot_figures.py             # NEW: produces Figs. 5, 9, 10, 11 from all CSVs
+│   ├── run_pipeline.py             # Single-job Abaqus driver (CLI args supported)
+│   ├── run_validation_sims.py      # NEW: 3 validation jobs ([0/90]s, [0/902]s, [0/904]s)
+│   ├── run_ply_number_study.py     # NEW: 1 new job ([0/90/0]) + 2 reused
+│   ├── run_ply_thickness_study.py  # NEW: 4 jobs (t90 = 20, 60, 100, 140 µm)
+│   ├── digitize_experimental.py    # NEW: helper for digitizing Fig. 5 experimental data
 │   └── run_all.py                  # Non-Abaqus utility runner (CSV/Vf preview)
 ├── abaqus_jobs/                    # Generated .cae / .odb / .inp (gitignored)
 └── results/                        # Generated CSV / PNG (gitignored)
@@ -41,27 +51,59 @@ damage2/
 # 1. Generate preview CSVs (no Abaqus required)
 python scripts/run_all.py
 
-# 2. Run the full Abaqus pipeline
+# 2. Run the full Abaqus pipeline (single job)
 abaqus cae noGUI=scripts/run_pipeline.py -- --submit
 
-# 3. Custom parameters
-abaqus cae noGUI=scripts/run_pipeline.py -- --t90=0.5 --rho-sat=8.0 --seed=42 --submit
+# 3. Run all 3 validation sims (Fig. 5)
+abaqus cae noGUI=scripts/run_validation_sims.py -- --submit
 
-# 4. Post-process the ODB
-abaqus python scripts/postprocess_odb.py --odb path/to/job.odb
+# 4. Run ply number study (Fig. 9, 11a) — also needs validation sims
+abaqus cae noGUI=scripts/run_ply_number_study.py -- --submit
+
+# 5. Run ply thickness study (Fig. 10, 11b) — 4 jobs
+abaqus cae noGUI=scripts/run_ply_thickness_study.py -- --submit
+
+# 6. Post-process each .odb file (one per job)
+abaqus python scripts/postprocess_odb.py --odb abaqus_jobs/val_090s.odb --job-name val_090s
+
+# 7. Digitize experimental data from paper Fig. 5 (one-time setup)
+python3 scripts/digitize_experimental.py --template
+# ... then edit data/experimental_fig5.csv with values from WebPlotDigitizer
+
+# 8. Plot all figures
+python3 scripts/plot_figures.py --figures 5,9,10,11
 ```
+
+### Reproducing the Paper — 8 Jobs Summary
+
+| # | Job Name | Layup | t90 (µm) | Figures |
+|---|----------|-------|----------|---------|
+| 1 | `val_090s`   | [0/90]ₛ    | 250 | 5, 6, 9, 11a |
+| 2 | `val_0902s`  | [0/90₂]ₛ   | 250 | 5, 6, 9, 11a |
+| 3 | `val_0904s`  | [0/90₄]ₛ   | 250 | 5, 6, 8 |
+| 4 | `pn_090n0`   | [0/90/0]   | 250 | 9, 11a |
+| 5 | `pt_t90_020` | [0/90/0]   | 20  | 10, 11b |
+| 6 | `pt_t90_060` | [0/90/0]   | 60  | 10, 11b |
+| 7 | `pt_t90_100` | [0/90/0]   | 100 | 10, 11b |
+| 8 | `pt_t90_140` | [0/90/0]   | 140 | 10, 11b |
+
+> Jobs 1, 2 are reused for both validation (Fig. 5) and ply-number study (Fig. 9).
 
 ### Differences from `Ali-tngsr/Damage`
 
 This repository adds:
-- `config.py` — central parameter store (prevents magic numbers across scripts)
+- `config.py` — central parameter store with 8-job registry (prevents magic numbers)
 - `material_table.py` — Table 1 source of truth (was inline in `mesoscale_common`)
 - `vf_field.py` — standalone Vf field generator (decoupled from Abaqus)
-- `plot_results.py` — publication-quality plotting helpers
+- `plot_results.py` — basic single-job plotting helper
+- `plot_figures.py` — full multi-job paper figure generator (Figs. 5, 9, 10, 11)
 - `run_all.py` — non-Abaqus utility runner for quick preview
 - `run_pipeline.py` — CLI argument support (`--L=`, `--t90=`, `--rho-sat=`, `--seed=`, `--submit`)
+- `run_validation_sims.py`, `run_ply_number_study.py`, `run_ply_thickness_study.py` — multi-job drivers
+- `digitize_experimental.py` — helper for digitizing paper Fig. 5 experimental data
 - `build_mesoscale_model.py` — automatic `Potential_Crack_Edges` set creation, input validation
 - `boundaryConditions.py` — orphan-mesh-aware BCs using `nodes` instead of `edges`
+- `postprocess_odb.py` — extended with volumetric-averaged σ90, E90 normalization, crack density
 
 ---
 
