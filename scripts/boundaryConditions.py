@@ -64,13 +64,27 @@ def setup_assembly_and_run(L=70.0, total_thickness=1.0, applied_strain=0.025,
 
             # 1. Force Element Type to COH2D4 (Standard Mechanical Library)
             elemType = mesh.ElemType(elemCode=COH2D4, elemLibrary=STANDARD)
-            p.setElementType(regions=(coh_set,), elemTypes=(elemType,))
+            try:
+                p.setElementType(regions=(coh_set,), elemTypes=(elemType,))
+                print('  Element type forced to COH2D4.')
+            except Exception as e:
+                print('  WARNING: setElementType failed: %s' % e)
 
-            # 2. Assign Cohesive Section
-            p.SectionAssignment(region=coh_set, sectionName='Cohesive_Sec',
-                                offset=0.0, offsetType=MIDDLE_SURFACE,
-                                offsetField='', thicknessAssignment=FROM_SECTION)
-            print('SUCCESS: Forced CohesiveSeam-1-Elements to COH2D4 and assigned Cohesive_Sec automatically.')
+            # 2. Assign Cohesive Section (try with optional kwargs first, fall back to minimal)
+            try:
+                p.SectionAssignment(region=coh_set, sectionName='Cohesive_Sec',
+                                    offset=0.0, offsetType=MIDDLE_SURFACE,
+                                    offsetField='', thicknessAssignment=FROM_SECTION)
+                print('  Section assigned with full kwargs.')
+            except (TypeError, Exception):
+                try:
+                    p.SectionAssignment(region=coh_set, sectionName='Cohesive_Sec')
+                    print('  Section assigned with minimal kwargs.')
+                except Exception as e:
+                    print('  WARNING: SectionAssignment failed: %s' % e)
+                    print('  You may need to assign Cohesive_Sec manually in Property module.')
+
+            print('SUCCESS: CohesiveSeam-1-Elements processed.')
         else:
             print('WARNING: CohesiveSeam-1-Elements set not found in part!')
 
@@ -93,15 +107,24 @@ def setup_assembly_and_run(L=70.0, total_thickness=1.0, applied_strain=0.025,
     # NOTE: this orientation applies to orphan-mesh elements (not faces).
     # The face-level orientation is set separately in build_mesoscale_model.py.
     all_elements = part.elements
-    part.MaterialOrientation(
-        region=regionToolset.Region(elements=all_elements),
-        orientationType=GLOBAL,
-        axis=AXIS_3,
-        additionalRotationType=ROTATION_NONE,
-        localCsys=None,
-        fieldName='',
-        stackDirection=STACK_3
-    )
+    try:
+        part.MaterialOrientation(
+            region=regionToolset.Region(elements=all_elements),
+            orientationType=GLOBAL,
+            axis=AXIS_3,
+            additionalRotationType=ROTATION_NONE,
+            localCsys=None,
+            fieldName='',
+            stackDirection=STACK_3
+        )
+    except (TypeError, Exception):
+        # Fall back to minimal MaterialOrientation call
+        try:
+            part.MaterialOrientation(
+                region=regionToolset.Region(elements=all_elements),
+                orientationType=GLOBAL, axis=AXIS_3)
+        except Exception as e:
+            print('  WARNING: MaterialOrientation failed: %s' % e)
     # ===========================================================
     if INSTANCE_NAME not in assembly.instances.keys():
         instance = assembly.Instance(name=INSTANCE_NAME, part=part, dependent=ON)
@@ -109,18 +132,33 @@ def setup_assembly_and_run(L=70.0, total_thickness=1.0, applied_strain=0.025,
         instance = assembly.instances[INSTANCE_NAME]
 
     if 'Step-1' not in model.steps.keys():
-        model.StaticStep(name='Step-1', previous='Initial', nlgeom=ON,
-                         initialInc=0.005, minInc=1.0e-12, maxInc=0.025,
-                         maxNumInc=10000)
+        # Try with all kwargs first, fall back to minimal set
+        try:
+            model.StaticStep(name='Step-1', previous='Initial', nlgeom=ON,
+                             initialInc=0.005, minInc=1.0e-12, maxInc=0.025,
+                             maxNumInc=10000)
+        except (TypeError, Exception):
+            try:
+                model.StaticStep(name='Step-1', previous='Initial', nlgeom=ON)
+            except Exception as e:
+                print('  WARNING: StaticStep creation failed: %s' % e)
 
     # ===============================================================
     # تنظیمات خروجی میدانی (Field Output) — خروجی‌های عمومی برای کل قطعه
     # شامل SDEG, STATUS, DMICRT برای ردیابی پیشرفت ترک در المان‌های کوهیزیو
     # ===============================================================
     if 'F-Output-1' in model.fieldOutputRequests.keys():
-        model.fieldOutputRequests['F-Output-1'].setValues(
-            variables=('S', 'E', 'U', 'RF', 'SDEG', 'STATUS', 'DMICRT'),
-            frequency=20)  # save every 20 increments (controls ODB size)
+        # Try setting variables + frequency, fall back to variables only
+        try:
+            model.fieldOutputRequests['F-Output-1'].setValues(
+                variables=('S', 'E', 'U', 'RF', 'SDEG', 'STATUS', 'DMICRT'),
+                frequency=20)
+        except (TypeError, Exception):
+            try:
+                model.fieldOutputRequests['F-Output-1'].setValues(
+                    variables=('S', 'E', 'U', 'RF', 'SDEG', 'STATUS', 'DMICRT'))
+            except Exception as e:
+                print('  WARNING: Could not update field output requests: %s' % e)
 
     tol = 1.0e-4
     # تغییر از edges به nodes به دلیل استفاده از Orphan Mesh

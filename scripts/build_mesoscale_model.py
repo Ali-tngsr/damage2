@@ -153,15 +153,23 @@ def build_model(L=70.0, t_0=0.25, t_90=0.5, rho_sat=8.0, seed=42,
     # === رفع خطای جهت‌گیری متریال (Material Orientation) ===
     # اختصاص محورهای مختصات جهانی به کل سطوح مدل
     all_faces = part.faces
-    part.MaterialOrientation(
-        region=regionToolset.Region(faces=all_faces),
-        orientationType=GLOBAL,
-        axis=AXIS_3,
-        additionalRotationType=ROTATION_NONE,
-        localCsys=None,
-        fieldName='',
-        stackDirection=STACK_3
-    )
+    try:
+        part.MaterialOrientation(
+            region=regionToolset.Region(faces=all_faces),
+            orientationType=GLOBAL,
+            axis=AXIS_3,
+            additionalRotationType=ROTATION_NONE,
+            localCsys=None,
+            fieldName='',
+            stackDirection=STACK_3
+        )
+    except (TypeError, Exception):
+        try:
+            part.MaterialOrientation(
+                region=regionToolset.Region(faces=all_faces),
+                orientationType=GLOBAL, axis=AXIS_3)
+        except Exception as e:
+            print('  WARNING: MaterialOrientation (faces) failed: %s' % e)
     # ========================================================
     
     print('Created %d continuum cells and %d cached materials.' % (n_cols * 7, len(model.materials.keys())))
