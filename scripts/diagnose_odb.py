@@ -168,15 +168,39 @@ def main():
             sdeg_field = last_frame.fieldOutputs['SDEG']
             print('  Step %s: SDEG has %d values' % (step_name, len(sdeg_field.values)))
 
-            # Collect SDEG stats
-            sdeg_values = []
-            for value in sdeg_field.values:
+            # Build a set of COH2D4 element labels per instance
+            # (SDEG is only meaningful for cohesive elements)
+            coh2d4_labels_per_instance = {}
+            for inst_name in instances.keys():
+                inst = instances[inst_name]
+                labels = set()
                 try:
-                    sdeg_values.append(float(value.data))
-                except (TypeError, ValueError):
+                    for elem in inst.elements:
+                        if str(elem.type).upper() == 'COH2D4':
+                            labels.add(elem.label)
+                except Exception:
                     pass
+                coh2d4_labels_per_instance[inst_name] = labels
+
+            # Collect SDEG stats (only from COH2D4 elements)
+            sdeg_values = []
+            try:
+                for value in sdeg_field.values:
+                    label = value.elementLabel
+                    inst_name = value.instance.name if value.instance else None
+                    if inst_name and inst_name in coh2d4_labels_per_instance:
+                        if label not in coh2d4_labels_per_instance[inst_name]:
+                            continue
+                    try:
+                        sdeg_values.append(float(value.data))
+                    except (TypeError, ValueError):
+                        pass
+            except Exception as e:
+                print('  Note: SDEG read failed for some elements: %s' % e)
 
             if sdeg_values:
+                print('    (only counting COH2D4 elements)')
+                print('    count: %d' % len(sdeg_values))
                 print('    min: %.6f' % min(sdeg_values))
                 print('    max: %.6f' % max(sdeg_values))
                 print('    mean: %.6f' % (sum(sdeg_values) / len(sdeg_values)))
@@ -186,6 +210,8 @@ def main():
                 print('    damaged (SDEG >= 0.95): %d' % damaged)
                 print('    partially damaged (0 < SDEG < 0.95): %d' % partial)
                 print('    untouched (SDEG == 0): %d' % sum(1 for v in sdeg_values if v == 0.0))
+            else:
+                print('    No SDEG values from COH2D4 elements')
 
         # =====================================================================
         # 8. STATUS field (cohesive element status)
@@ -202,13 +228,25 @@ def main():
 
             status_field = last_frame.fieldOutputs['STATUS']
             print('  Step %s: STATUS has %d values' % (step_name, len(status_field.values)))
+
+            # Reuse coh2d4_labels_per_instance
             status_values = []
-            for value in status_field.values:
-                try:
-                    status_values.append(float(value.data))
-                except (TypeError, ValueError):
-                    pass
+            try:
+                for value in status_field.values:
+                    label = value.elementLabel
+                    inst_name = value.instance.name if value.instance else None
+                    if inst_name and inst_name in coh2d4_labels_per_instance:
+                        if label not in coh2d4_labels_per_instance[inst_name]:
+                            continue
+                    try:
+                        status_values.append(float(value.data))
+                    except (TypeError, ValueError):
+                        pass
+            except Exception as e:
+                print('  Note: STATUS read failed for some elements: %s' % e)
+
             if status_values:
+                print('    (only counting COH2D4 elements)')
                 open_count = sum(1 for v in status_values if v < 1.0)
                 closed_count = sum(1 for v in status_values if v >= 1.0)
                 print('    open (STATUS < 1): %d' % open_count)

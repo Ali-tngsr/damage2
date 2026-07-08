@@ -140,7 +140,7 @@ def _total_reaction_force(rf_field, direction=0):
     return total
 
 
-def _count_cracks(sdeg_field, crack_labels, threshold=SDEG_FULLY_DAMAGED_THRESHOLD):
+def _count_cracks(sdeg_field, crack_labels, instance=None, threshold=SDEG_FULLY_DAMAGED_THRESHOLD):
     """Count fully-propagated cracks.
 
     A crack is counted when SDEG >= threshold across all cohesive elements in
@@ -157,11 +157,28 @@ def _count_cracks(sdeg_field, crack_labels, threshold=SDEG_FULLY_DAMAGED_THRESHO
     if not crack_labels or sdeg_field is None:
         return 0, 0
 
+    # Build a set of COH2D4 element labels if instance is provided
+    # (we only want to read SDEG/STATUS/DMICRT from cohesive elements,
+    # because Abaqus throws errors when reading these fields from
+    # continuum elements like CPS4R)
+    coh2d4_labels = None
+    if instance is not None:
+        coh2d4_labels = set()
+        try:
+            for elem in instance.elements:
+                if str(elem.type).upper() == 'COH2D4':
+                    coh2d4_labels.add(elem.label)
+        except Exception:
+            coh2d4_labels = None
+
     damaged_count = 0
     total_count = 0
     for value in sdeg_field.values:
         label = value.elementLabel
+        # Filter: only process elements that are in crack_labels AND (if available) are COH2D4
         if label not in crack_labels:
+            continue
+        if coh2d4_labels is not None and label not in coh2d4_labels:
             continue
         total_count += 1
         try:
@@ -364,9 +381,15 @@ def extract_results(odb_path, output_csv=None, job_name=None,
             crack_count = 0
             total_cohesive = 0
             if 'SDEG' in frame.fieldOutputs.keys():
-                sdeg_field = frame.fieldOutputs['SDEG']
-                crack_count, total_cohesive = _count_cracks(
-                    sdeg_field, crack_labels)
+                try:
+                    sdeg_field = frame.fieldOutputs['SDEG']
+                    crack_count, total_cohesive = _count_cracks(
+                        sdeg_field, crack_labels, instance=instance)
+                except Exception as e:
+                    if frame_idx == n_frames - 1:
+                        print('  Note: SDEG read failed: %s' % e)
+                    crack_count = 0
+                    total_cohesive = 0
 
             # ---- Normalized crack density ----
             # Paper: ρ_norm = (number of cracks) / (ρ_sat × L)
