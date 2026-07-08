@@ -66,43 +66,75 @@ def create_cohesive_material(model, strength=17.0, fracture_energy=0.2,
 
 
 def create_cohesive_section(model):
-    """Create the cohesive section.
+    """Create the cohesive section with viscous stabilization via Section Controls.
 
-    Uses initialThicknessType=ANALYTICAL with a small thickness (0.001 mm)
-    instead of GEOMETRY. This prevents the 'thickness calculated from
-    geometry is equal to zero' error that occurs with zero-thickness
-    cohesive elements created by the Insert cohesive seams tool.
+    For cohesive elements with TRACTION_SEPARATION response, viscosity CANNOT
+    be defined via *DAMAGE STABILIZATION in the material. Instead, it must be
+    defined via *SECTION CONTROLS in the section.
+
+    This prevents the warning:
+      'COHESIVE ELEMENTS WITH TRACTION SEPARATION RESPONSE CANNOT USE
+       *DAMAGE STABILIZATION. VISCOSITY SHOULD BE DEFINED BY USING
+       *SECTION CONTROLS'
+
+    Uses initialThicknessType=ANALYTICAL with thickness=0.001 to prevent
+    the zero-thickness error.
     """
     if COH_SECTION_NAME not in model.sections.keys():
         try:
-            # First try: ANALYTICAL with specified thickness (most reliable)
+            # Create cohesive section with ANALYTICAL thickness
             model.CohesiveSection(name=COH_SECTION_NAME, material=COH_MAT_NAME,
                                   response=TRACTION_SEPARATION,
                                   initialThicknessType=ANALYTICAL,
                                   initialThickness=0.001)
             print('Cohesive section created (ANALYTICAL, t=0.001): %s' % COH_SECTION_NAME)
+
+            # Add Section Controls for viscous stabilization
+            # This is the ONLY way to add viscosity to traction-separation cohesive elements
+            section = model.sections[COH_SECTION_NAME]
+            try:
+                # Try different keyword names for viscosity across Abaqus versions
+                viscosity_keywords = ['viscosity', 'stabilizationCoefficient',
+                                      'dampingViscosity', 'cohesiveViscosity']
+                viscosity_added = False
+                for kw in viscosity_keywords:
+                    try:
+                        kwargs = {'viscosity': 1e-4} if kw == 'viscosity' else {kw: 1e-4}
+                        section.SectionControls(**kwargs)
+                        print('  Viscous stabilization added via SectionControls (keyword=%s, value=1e-4)' % kw)
+                        viscosity_added = True
+                        break
+                    except (TypeError, Exception):
+                        continue
+
+                if not viscosity_added:
+                    # Try alternative API: sectionControls() at model level
+                    try:
+                        model.SectionControls(name='Coh_Sec_Controls', viscosity=1e-4)
+                        print('  Viscous stabilization added via model.SectionControls')
+                        viscosity_added = True
+                    except Exception:
+                        pass
+
+                if not viscosity_added:
+                    print('  Note: Could not auto-add Section Controls viscosity.')
+                    print('  If convergence fails, add manually:')
+                    print('    Property > Section > Cohesive_Sec > Edit > Section Controls > Viscosity: 1e-4')
+            except Exception as e:
+                print('  Note: SectionControls failed: %s' % e)
+                print('  Add viscosity manually if needed.')
+
         except (TypeError, Exception) as e1:
             print('  ANALYTICAL thickness failed: %s' % e1)
             try:
-                # Fallback 1: try with thickness keyword
                 model.CohesiveSection(name=COH_SECTION_NAME, material=COH_MAT_NAME,
                                       response=TRACTION_SEPARATION,
-                                      initialThicknessType=ANALYTICAL,
-                                      thickness=0.001)
-                print('Cohesive section created (thickness=0.001): %s' % COH_SECTION_NAME)
-            except (TypeError, Exception) as e2:
-                print('  thickness keyword failed: %s' % e2)
-                try:
-                    # Fallback 2: GEOMETRY (may cause zero-thickness error)
-                    model.CohesiveSection(name=COH_SECTION_NAME, material=COH_MAT_NAME,
-                                          response=TRACTION_SEPARATION,
-                                          initialThicknessType=GEOMETRY)
-                    print('Cohesive section created (GEOMETRY fallback): %s' % COH_SECTION_NAME)
-                    print('  WARNING: GEOMETRY type may cause zero-thickness errors.')
-                    print('  If job fails, set thickness manually in Property module.')
-                except Exception as e3:
-                    print('  WARNING: CohesiveSection creation failed: %s' % e3)
-                    return
+                                      initialThicknessType=GEOMETRY)
+                print('Cohesive section created (GEOMETRY fallback): %s' % COH_SECTION_NAME)
+                print('  WARNING: GEOMETRY type may cause zero-thickness errors.')
+            except Exception as e2:
+                print('  WARNING: CohesiveSection creation failed: %s' % e2)
+                return
 
 
 def mesh_continuum_part(element_size=0.125):

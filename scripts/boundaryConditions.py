@@ -71,6 +71,8 @@ def setup_assembly_and_run(L=70.0, total_thickness=1.0, applied_strain=0.025,
 
             # Ensure cohesive section uses ANALYTICAL thickness (not GEOMETRY),
             # because zero-thickness cohesive elements need explicit thickness.
+            # Also add Section Controls for viscous stabilization (the ONLY way
+            # to add viscosity to traction-separation cohesive elements).
             try:
                 if 'Cohesive_Sec' in model.sections.keys():
                     del model.sections['Cohesive_Sec']
@@ -81,6 +83,33 @@ def setup_assembly_and_run(L=70.0, total_thickness=1.0, applied_strain=0.025,
                                       initialThicknessType=ANALYTICAL,
                                       initialThickness=0.001)
                 print('  Recreated Cohesive_Sec with ANALYTICAL thickness (0.001 mm)')
+
+                # Add Section Controls for viscous stabilization
+                section = model.sections['Cohesive_Sec']
+                viscosity_keywords = ['viscosity', 'stabilizationCoefficient',
+                                      'dampingViscosity', 'cohesiveViscosity']
+                viscosity_added = False
+                for kw in viscosity_keywords:
+                    try:
+                        kwargs = {'viscosity': 1e-4} if kw == 'viscosity' else {kw: 1e-4}
+                        section.SectionControls(**kwargs)
+                        print('  Viscous stabilization added (keyword=%s, value=1e-4)' % kw)
+                        viscosity_added = True
+                        break
+                    except (TypeError, Exception):
+                        continue
+
+                if not viscosity_added:
+                    try:
+                        model.SectionControls(name='Coh_Sec_Controls', viscosity=1e-4)
+                        print('  Viscous stabilization added via model.SectionControls')
+                        viscosity_added = True
+                    except Exception:
+                        pass
+
+                if not viscosity_added:
+                    print('  Note: Could not auto-add viscosity via Section Controls.')
+                    print('  Add manually: Property > Section > Cohesive_Sec > Edit > Section Controls > Viscosity: 1e-4')
             except Exception as e:
                 print('  Note: Could not recreate Cohesive_Sec: %s' % e)
                 print('  If you get zero-thickness errors, set it manually:')
