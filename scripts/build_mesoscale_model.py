@@ -11,18 +11,36 @@ from __future__ import print_function
 import os
 import sys
 
+# Robust path bootstrap for Abaqus Python 2.7 noGUI mode
+def _resolve_script_dir():
+    try:
+        if __file__:
+            return os.path.dirname(os.path.abspath(__file__))
+    except NameError:
+        pass
+    try:
+        if sys.argv and sys.argv[0]:
+            argv0 = sys.argv[0]
+            if not os.path.isabs(argv0):
+                argv0 = os.path.join(os.getcwd(), argv0)
+            if os.path.isfile(argv0):
+                return os.path.dirname(os.path.abspath(argv0))
+    except (IndexError, AttributeError):
+        pass
+    cwd = os.getcwd()
+    for candidate in (os.path.join(cwd, 'scripts'), cwd):
+        if os.path.isfile(os.path.join(candidate, 'config.py')) or \
+           os.path.isfile(os.path.join(candidate, 'mesoscale_common.py')):
+            return os.path.abspath(candidate)
+    return cwd
+
+SCRIPT_DIR = _resolve_script_dir()
+if SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, SCRIPT_DIR)
+
 from abaqus import *
 from abaqusConstants import *
 import regionToolset
-
-import inspect
-try:
-    SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-except NameError:
-    SCRIPT_DIR = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
-
-if SCRIPT_DIR not in sys.path:
-    sys.path.insert(0, SCRIPT_DIR)
 
 from mesoscale_common import assign_vf_field, get_properties, rounded_vf, safe_name
 
