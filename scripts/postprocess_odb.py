@@ -229,19 +229,96 @@ def extract_results(odb_path, output_csv=None, job_name=None,
 
     try:
         step = odb.steps[STEP_NAME]
-        instance = odb.rootAssembly.instances[INSTANCE_NAME]
 
-        # Pre-compute element label sets and volumes once
-        ply90_set = _safe_get(instance.elementSets, PLY90_SET_NAME)
-        crack_set = _safe_get(instance.elementSets, CRACK_SET_NAME)
+        # =====================================================================
+        # Auto-detect instance name (it may differ between GUI and noGUI setup)
+        # =====================================================================
+        instances = odb.rootAssembly.instances
+        instance = None
+
+        # Strategy 1: try the expected name
+        if INSTANCE_NAME in instances.keys():
+            instance = instances[INSTANCE_NAME]
+            print('  Found instance: %s' % INSTANCE_NAME)
+        else:
+            # Strategy 2: list all instances and pick the one with PLY90_FACES set
+            print('  Instance "%s" not found. Available instances:' % INSTANCE_NAME)
+            for name in instances.keys():
+                print('    - %s' % name)
+
+            # Try to find an instance that contains PLY90_FACES set
+            for name in instances.keys():
+                inst = instances[name]
+                if PLY90_SET_NAME in inst.elementSets.keys() or \
+                   PLY90_SET_NAME.upper() in [s.upper() for s in inst.elementSets.keys()]:
+                    instance = inst
+                    print('  Auto-selected instance: %s (has %s set)' % (name, PLY90_SET_NAME))
+                    break
+
+            # Strategy 3: if only one instance, use it
+            if instance is None and len(instances.keys()) == 1:
+                instance = instances[instances.keys()[0]]
+                print('  Auto-selected only instance: %s' % instances.keys()[0])
+
+            # Strategy 4: pick the first non-assembly instance
+            if instance is None:
+                for name in instances.keys():
+                    if not name.startswith('ASSEMBLY'):
+                        instance = instances[name]
+                        print('  Auto-selected instance: %s' % name)
+                        break
+
+        if instance is None:
+            raise KeyError('No suitable instance found in ODB. Available: %s'
+                          % ', '.join(instances.keys()))
+
+        # =====================================================================
+        # Auto-detect set names (case-insensitive fallback)
+        # =====================================================================
+        ply90_set = None
+        for sname in (PLY90_SET_NAME, PLY90_SET_NAME.upper(), PLY90_SET_NAME.lower(),
+                      'PLY90', 'PLY_90_FACES', 'PLY90FACES'):
+            ply90_set = _safe_get(instance.elementSets, sname)
+            if ply90_set is not None:
+                if sname != PLY90_SET_NAME:
+                    print('  Note: using set "%s" instead of "%s"' % (sname, PLY90_SET_NAME))
+                break
+
+        crack_set = None
+        for sname in (CRACK_SET_NAME, POTENTIAL_CRACK_EDGES_SET,
+                      CRACK_SET_NAME.upper(), POTENTIAL_CRACK_EDGES_SET.upper(),
+                      'CRACK_PATHS', 'POTENTIAL_CRACK_EDGES'):
+            crack_set = _safe_get(instance.elementSets, sname)
+            if crack_set is not None:
+                if sname not in (CRACK_SET_NAME, POTENTIAL_CRACK_EDGES_SET):
+                    print('  Note: using crack set "%s"' % sname)
+                break
+
+        # Also check the assembly-level sets (sometimes sets are defined there)
+        if ply90_set is None:
+            for sname in (PLY90_SET_NAME, PLY90_SET_NAME.upper()):
+                ply90_set = _safe_get(odb.rootAssembly.elementSets, sname)
+                if ply90_set is not None:
+                    print('  Note: using assembly-level set "%s"' % sname)
+                    break
+
         if crack_set is None:
-            crack_set = _safe_get(instance.elementSets, POTENTIAL_CRACK_EDGES_SET)
+            for sname in (CRACK_SET_NAME, POTENTIAL_CRACK_EDGES_SET):
+                crack_set = _safe_get(odb.rootAssembly.elementSets, sname)
+                if crack_set is not None:
+                    print('  Note: using assembly-level crack set "%s"' % sname)
+                    break
 
         ply90_labels = _element_label_set(ply90_set)
         crack_labels = _element_label_set(crack_set)
 
         print('  Ply-90 elements: %d' % len(ply90_labels))
         print('  Cohesive (crack) elements: %d' % len(crack_labels))
+        if len(ply90_labels) == 0:
+            print('  WARNING: No PLY90 elements found. Set name may differ.')
+            print('  Available element sets on instance:')
+            for sname in instance.elementSets.keys():
+                print('    - %s' % sname)
 
         # Pre-compute volumes for volumetric averaging (one-time cost)
         print('  Computing element volumes...')
