@@ -43,7 +43,7 @@ def _show_dialog():
     fields = ('Job name:',)
     msg = ('Enter the job name (must match what you used in gui_build.py).\n\n'
            'Valid names: ' + job_list)
-    values = getInputs(fields, msg, title='Finish Model Setup')
+    values = getInputs(fields, msg, dialogTitle='Finish Model Setup')
     return values
 
 

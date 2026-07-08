@@ -42,7 +42,7 @@ def _show_dialog():
 
     fields = ('Job name (e.g. val_090s):',)
     msg = 'Available jobs:\n' + job_list + '\n\nEnter the job name to build:'
-    values = getInputs(fields, msg, title='Build Model')
+    values = getInputs(fields, msg, dialogTitle='Build Model')
     return values
 
 
