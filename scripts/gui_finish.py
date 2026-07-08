@@ -20,114 +20,16 @@ import os
 import sys
 import inspect
 
-
-def _find_scripts_dir():
-    """Find the damage2/scripts/ directory using multiple strategies."""
-    # Strategy 1: __file__ attribute
-    try:
-        if __file__:
-            candidate = os.path.dirname(os.path.abspath(__file__))
-            if os.path.isfile(os.path.join(candidate, 'config.py')):
-                return candidate
-    except NameError:
-        pass
-
-    # Strategy 2: inspect current frame
-    try:
-        frame = inspect.currentframe()
-        if frame:
-            code = frame.f_code
-            if code and code.co_filename:
-                candidate = os.path.dirname(os.path.abspath(code.co_filename))
-                if os.path.isfile(os.path.join(candidate, 'config.py')):
-                    return candidate
-    except Exception:
-        pass
-
-    # Strategy 3: walk up the call stack
-    try:
-        frame = inspect.currentframe()
-        while frame:
-            code = frame.f_code
-            if code and code.co_filename and 'gui_finish' in code.co_filename:
-                candidate = os.path.dirname(os.path.abspath(code.co_filename))
-                if os.path.isfile(os.path.join(candidate, 'config.py')):
-                    return candidate
-            frame = frame.f_back
-    except Exception:
-        pass
-
-    # Strategy 4: sys.argv[0]
-    try:
-        if sys.argv and sys.argv[0]:
-            argv0 = sys.argv[0]
-            if not os.path.isabs(argv0):
-                argv0 = os.path.join(os.getcwd(), argv0)
-            if os.path.isfile(argv0):
-                candidate = os.path.dirname(os.path.abspath(argv0))
-                if os.path.isfile(os.path.join(candidate, 'config.py')):
-                    return candidate
-    except (IndexError, AttributeError):
-        pass
-
-    # Strategy 5: scan cwd
-    cwd = os.getcwd()
-    candidates = [
-        cwd,
-        os.path.join(cwd, 'scripts'),
-        os.path.dirname(cwd),
-        os.path.join(os.path.dirname(cwd), 'scripts'),
-    ]
-    for candidate in candidates:
-        if os.path.isfile(os.path.join(candidate, 'config.py')):
-            return os.path.abspath(candidate)
-
-    return None
-
-
-def _ask_user_for_path():
-    """If auto-detection fails, ask the user via dialog."""
-    try:
-        from abaqus import getInputs
-        fields = ('Path to damage2/scripts/ folder:',)
-        msg = ('Could not auto-detect the damage2/scripts/ directory.\n\n'
-               'Please enter the full path to the scripts/ folder.\n'
-               'Example: C:/Users/AVA/Downloads/damage2-dev/scripts')
-        values = getInputs(fields, msg, title='Locate scripts folder')
-        if values and values[0]:
-            path = values[0].strip().strip('"').strip("'")
-            if os.path.isfile(os.path.join(path, 'config.py')):
-                return path
-            if os.path.isfile(os.path.join(path, 'scripts', 'config.py')):
-                return os.path.join(path, 'scripts')
-    except Exception as e:
-        print('Could not show dialog: %s' % e)
-    return None
-
-
-# =============================================================================
-# Bootstrap path
-# =============================================================================
-SCRIPT_DIR = _find_scripts_dir()
-
-if not SCRIPT_DIR:
-    print('Auto-detection failed. Asking user for path...')
-    SCRIPT_DIR = _ask_user_for_path()
-
-if not SCRIPT_DIR:
-    print('ERROR: Could not locate the scripts/ directory.')
-    print('Please make sure gui_finish.py is inside the damage2/scripts/ folder,')
-    print('or enter the path manually in the dialog.')
-    sys.exit(1)
+# Same bootstrap as the original run_pipeline.py (proven to work both in
+# noGUI mode and File > Run Script mode via inspect.getfile fallback)
+try:
+    SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+except NameError:
+    SCRIPT_DIR = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
 
 REPO_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, '..'))
 if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
-if REPO_DIR not in sys.path:
-    sys.path.insert(0, REPO_DIR)
-
-print('Script directory: %s' % SCRIPT_DIR)
-print('Repo directory:   %s' % REPO_DIR)
 
 import config
 from boundaryConditions import setup_assembly_and_run

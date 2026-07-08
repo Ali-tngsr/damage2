@@ -14,56 +14,21 @@ from __future__ import print_function
 
 import os
 import sys
+import inspect
 
-# =============================================================================
-# Robust path bootstrap — works in Abaqus Python 2.7 noGUI mode where
-# __file__ may not be defined and sys.argv[0] may be a relative path.
-# =============================================================================
-def _resolve_script_dir():
-    """Find the directory containing this script, trying multiple strategies."""
-    try:
-        if __file__:
-            return os.path.dirname(os.path.abspath(__file__))
-    except NameError:
-        pass
-    try:
-        if sys.argv and sys.argv[0]:
-            argv0 = sys.argv[0]
-            if not os.path.isabs(argv0):
-                argv0 = os.path.join(os.getcwd(), argv0)
-            if os.path.isfile(argv0):
-                return os.path.dirname(os.path.abspath(argv0))
-    except (IndexError, AttributeError):
-        pass
-    try:
-        main_mod = sys.modules.get('__main__')
-        if main_mod and hasattr(main_mod, '__file__') and main_mod.__file__:
-            return os.path.dirname(os.path.abspath(main_mod.__file__))
-    except (AttributeError, TypeError):
-        pass
-    cwd = os.getcwd()
-    for candidate in (os.path.join(cwd, 'scripts'), cwd):
-        if os.path.isfile(os.path.join(candidate, 'config.py')):
-            return os.path.abspath(candidate)
-    return None
+from abaqus import mdb
+from abaqusConstants import OFF
 
-
-SCRIPT_DIR = _resolve_script_dir()
-if not SCRIPT_DIR:
-    print('ERROR: Could not locate script directory.')
-    print('Please run this script from the damage2/ repo root:')
-    print('  cd <path-to-damage2>')
-    print('  abaqus cae noGUI=scripts/run_ply_number_study.py -- --no-submit')
-    sys.exit(1)
+# Same bootstrap as the original code (proven to work both in noGUI mode
+# and File > Run Script mode via inspect.getfile fallback)
+try:
+    SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+except NameError:
+    SCRIPT_DIR = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
 
 REPO_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, '..'))
 if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
-if REPO_DIR not in sys.path:
-    sys.path.insert(0, REPO_DIR)
-
-from abaqus import mdb
-from abaqusConstants import OFF
 
 import config
 from run_pipeline import run_pipeline
