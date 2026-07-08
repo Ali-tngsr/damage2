@@ -12,27 +12,41 @@
 This repository is a refactored fork of `Ali-tngsr/Damage`. All Abaqus scripts are Python 2.7 compatible.
 
 > **See [`ROADMAP.md`](./ROADMAP.md)** for the full plan to reproduce all 11 paper figures.
-> **See [`MANUAL_COHESIVE_WORKFLOW.md`](./MANUAL_COHESIVE_WORKFLOW.md)** for the step-by-step Abaqus/CAE GUI guide on inserting cohesive elements (the only non-automated step).
+> **See [`GUI_WORKFLOW.md`](./GUI_WORKFLOW.md)** for the fully graphical workflow (no command line except for opening CAE).
+> **See [`MANUAL_COHESIVE_WORKFLOW.md`](./MANUAL_COHESIVE_WORKFLOW.md)** for the step-by-step Abaqus/CAE GUI guide on inserting cohesive elements.
 
-### Workflow Mode
+### Two Ways to Run
+
+| Workflow | When to use | Documentation |
+|----------|-------------|---------------|
+| **GUI Workflow** (recommended) | You prefer working in Abaqus/CAE graphical interface | [`GUI_WORKFLOW.md`](./GUI_WORKFLOW.md) |
+| **Command Line Workflow** | You want full automation / batch processing | [`ROADMAP.md`](./ROADMAP.md) §3 |
+
+### Workflow Mode (Cohesive Insertion)
 
 The pipeline operates in **manual cohesive insertion mode** (`COHESIVE_INSERTION_MODE = 'manual'` in `config.py`):
 
-1. **BUILD** (automated): `run_pipeline.py` produces a `.cae` with geometry, mesh, materials, and edge sets. The `Potential_Crack_Edges` set contains all the vertical partition edges where cohesive elements should be inserted.
+1. **BUILD** (automated): `gui_build.py` or `run_pipeline.py` produces a `.cae` with geometry, mesh, materials, and edge sets. The `Potential_Crack_Edges` set contains all the vertical partition edges where cohesive elements should be inserted.
 2. **MANUAL** (CAE GUI): User opens `.cae` in Abaqus/CAE and uses the built-in **Mesh → Edit → Element → Create** tool to insert COH2D4 elements along the edges in the set. The cohesive material (`Cohesive_Mat`) and section (`Cohesive_Sec`) are already pre-defined by the pipeline. See `MANUAL_COHESIVE_WORKFLOW.md` for the step-by-step guide (~5 min per job).
-3. **RESUME** (automated): Re-run with `--resume-only --submit` to apply BCs and submit the job.
-4. **POST** (automated): `postprocess_odb.py` extracts stress/strain/crack data to CSV; `plot_figures.py` produces publication figures.
+3. **FINISH** (automated): `gui_finish.py` sets up assembly, BCs, step, and creates the Job.
+4. **SUBMIT**: From Job Manager (GUI) or `--submit` flag (command line).
+5. **POST** (automated): `postprocess_odb.py` extracts stress/strain/crack data to CSV; `plot_figures.py` produces publication figures.
 
 ```
 damage2/
 ├── README.md                       # This document
-├── ROADMAP.md                      # Full reproduction plan (automated vs manual steps)
+├── ROADMAP.md                      # Full reproduction plan (command line workflow)
+├── GUI_WORKFLOW.md                 # NEW: fully graphical workflow guide
+├── MANUAL_COHESIVE_WORKFLOW.md     # Step-by-step Abaqus/CAE GUI guide for cohesive insertion
+├── .gitignore
 ├── data/
 │   ├── table1_properties.csv       # Homogenized properties for Vf = 0..90%
 │   ├── table1_transcribed.csv      # Sanity-check artifact from run_all.py
 │   └── experimental_fig5.csv       # Digitized experimental data (template, edit via digitize_experimental.py)
 ├── scripts/
 │   ├── config.py                   # Central config + JOBS registry (8 jobs to reproduce paper)
+│   ├── gui_build.py                # NEW: GUI-driven build script (File > Run Script in CAE)
+│   ├── gui_finish.py               # NEW: GUI-driven finish script (BCs + Job creation)
 │   ├── material_table.py           # Table 1 data + interpolation helpers
 │   ├── material_interp.py          # Property interpolation (numpy + pure-python)
 │   ├── vf_field.py                 # Stochastic Vf field generator
@@ -44,12 +58,12 @@ damage2/
 │   ├── boundaryConditions.py       # Assembly, BCs, step, job creation
 │   ├── postprocess_odb.py          # Full ODB extraction (σ90, E90, crack density, etc.)
 │   ├── plot_results.py             # Basic matplotlib helper (single job)
-│   ├── plot_figures.py             # NEW: produces Figs. 5, 9, 10, 11 from all CSVs
+│   ├── plot_figures.py             # Produces Figs. 5, 9, 10, 11 from all CSVs
 │   ├── run_pipeline.py             # Single-job Abaqus driver (CLI args supported)
-│   ├── run_validation_sims.py      # NEW: 3 validation jobs ([0/90]s, [0/902]s, [0/904]s)
-│   ├── run_ply_number_study.py     # NEW: 1 new job ([0/90/0]) + 2 reused
-│   ├── run_ply_thickness_study.py  # NEW: 4 jobs (t90 = 20, 60, 100, 140 µm)
-│   ├── digitize_experimental.py    # NEW: helper for digitizing Fig. 5 experimental data
+│   ├── run_validation_sims.py      # 3 validation jobs ([0/90]s, [0/902]s, [0/904]s)
+│   ├── run_ply_number_study.py     # 1 new job ([0/90/0]) + 2 reused
+│   ├── run_ply_thickness_study.py  # 4 jobs (t90 = 20, 60, 100, 140 µm)
+│   ├── digitize_experimental.py    # Helper for digitizing Fig. 5 experimental data
 │   └── run_all.py                  # Non-Abaqus utility runner (CSV/Vf preview)
 ├── abaqus_jobs/                    # Generated .cae / .odb / .inp (gitignored)
 └── results/                        # Generated CSV / PNG (gitignored)
