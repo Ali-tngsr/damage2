@@ -52,7 +52,28 @@ def setup_assembly_and_run(L=70.0, total_thickness=1.0, applied_strain=0.025,
     # If resuming from a manually-edited .cae (cohesive elements already
     # inserted by user), the assembly/BCs may already exist — skip them.
     if skip_if_exists and INSTANCE_NAME in assembly.instances.keys():
-        print('Assembly already exists (resume mode) — skipping setup.')
+        print('Assembly already exists (resume mode) — Intercepting and fixing manual cohesive elements...')
+
+        part_name = 'Specimen_Orphan' if 'Specimen_Orphan' in model.parts.keys() else 'Specimen'
+        p = model.parts[part_name]
+
+        # Automatically fix Element Type and Section Assignment for manually inserted seams
+        if 'CohesiveSeam-1-Elements' in p.sets.keys():
+            import mesh
+            coh_set = p.sets['CohesiveSeam-1-Elements']
+
+            # 1. Force Element Type to COH2D4 (Standard Mechanical Library)
+            elemType = mesh.ElemType(elemCode=COH2D4, elemLibrary=STANDARD)
+            p.setElementType(regions=(coh_set,), elemTypes=(elemType,))
+
+            # 2. Assign Cohesive Section
+            p.SectionAssignment(region=coh_set, sectionName='Cohesive_Sec',
+                                offset=0.0, offsetType=MIDDLE_SURFACE,
+                                offsetField='', thicknessAssignment=FROM_SECTION)
+            print('SUCCESS: Forced CohesiveSeam-1-Elements to COH2D4 and assigned Cohesive_Sec automatically.')
+        else:
+            print('WARNING: CohesiveSeam-1-Elements set not found in part!')
+
         if job_name not in mdb.jobs.keys():
             mdb.Job(name=job_name, model=MODEL_NAME,
                     description='Mesoscale transverse cracking simulation',

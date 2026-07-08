@@ -37,6 +37,10 @@ def create_stochastic_cohesive_materials(model, vf_field, n_cols,
                 material.maxsDamageInitiation.DamageEvolution(
                     type=ENERGY, softening=LINEAR,
                     table=((fracture_energy,),))
+                # Viscous regularization to prevent Abaqus/Standard crashes
+                # (Too many attempts) when cracks initiate. µ = 1e-4 is a
+                # commonly used value that minimally affects results.
+                material.maxsDamageInitiation.DamageStabilizationCohesive(cohesiveViscosity=1e-4)
     print('Created %d stochastic cohesive materials.' % (n_cols * 5))
 
 
@@ -52,6 +56,9 @@ def create_cohesive_material(model, strength=17.0, fracture_energy=0.2,
     material.MaxsDamageInitiation(table=((strength, strength, strength),))
     material.maxsDamageInitiation.DamageEvolution(type=ENERGY, softening=LINEAR,
                                                   table=((fracture_energy,),))
+    # Viscous regularization to prevent Abaqus/Standard crashes
+    # (Too many attempts) when cracks initiate.
+    material.maxsDamageInitiation.DamageStabilizationCohesive(cohesiveViscosity=1e-4)
     print('Cohesive material created: %s' % COH_MAT_NAME)
     return material
 
