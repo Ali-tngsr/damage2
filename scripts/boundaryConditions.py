@@ -69,6 +69,24 @@ def setup_assembly_and_run(L=70.0, total_thickness=1.0, applied_strain=0.025,
             p = model.parts[part_name]
             print('  Using part: %s' % part_name)
 
+            # Ensure cohesive section uses ANALYTICAL thickness (not GEOMETRY),
+            # because zero-thickness cohesive elements need explicit thickness.
+            try:
+                if 'Cohesive_Sec' in model.sections.keys():
+                    del model.sections['Cohesive_Sec']
+                    print('  Deleted existing Cohesive_Sec (recreating with ANALYTICAL thickness)')
+                from abaqusConstants import ANALYTICAL, TRACTION_SEPARATION
+                model.CohesiveSection(name='Cohesive_Sec', material='Cohesive_Mat',
+                                      response=TRACTION_SEPARATION,
+                                      initialThicknessType=ANALYTICAL,
+                                      initialThickness=0.001)
+                print('  Recreated Cohesive_Sec with ANALYTICAL thickness (0.001 mm)')
+            except Exception as e:
+                print('  Note: Could not recreate Cohesive_Sec: %s' % e)
+                print('  If you get zero-thickness errors, set it manually:')
+                print('    Property module > Section > Cohesive_Sec > Edit >')
+                print('    Initial thickness: ANALYTICAL > 0.001')
+
             # Automatically fix Element Type and Section Assignment for manually inserted seams
             if 'CohesiveSeam-1-Elements' in p.sets.keys():
                 import mesh
