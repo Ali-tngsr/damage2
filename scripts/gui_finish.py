@@ -37,14 +37,13 @@ from boundaryConditions import setup_assembly_and_run
 
 def _show_dialog():
     """Show a dialog to enter the job name."""
-    from abaqus import getInputs
+    from abaqus import getInput
 
     job_list = ', '.join(j['name'] for j in config.JOBS)
-    fields = ('Job name:',)
-    msg = ('Enter the job name (must match what you used in gui_build.py).\n\n'
-           'Valid names: ' + job_list)
-    values = getInputs(fields, msg, dialogTitle='Finish Model Setup')
-    return values
+    prompt = ('Enter the job name (must match what you used in gui_build.py).\n\n'
+              'Valid names: ' + job_list)
+    value = getInput(prompt, 'Job name')
+    return value
 
 
 def main():
@@ -59,12 +58,12 @@ def main():
     print()
 
     # Show dialog
-    values = _show_dialog()
-    if not values or not values[0]:
+    value = _show_dialog()
+    if not value:
         print('Cancelled by user.')
         return
 
-    job_name = values[0].strip()
+    job_name = value.strip()
     job = config.get_job_by_name(job_name)
     if job is None:
         print('ERROR: job "%s" not found in config.JOBS' % job_name)

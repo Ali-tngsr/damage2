@@ -34,16 +34,15 @@ from run_pipeline import run_pipeline
 
 def _show_dialog():
     """Show a dialog to select which job to build."""
-    from abaqus import getInputs
+    from abaqus import getInput
 
     job_list = '\n'.join(['  %d. %s (%s, t90=%.3f mm)' % (
         i + 1, j['name'], j['layup'], j['t90_mm'])
         for i, j in enumerate(config.JOBS)])
 
-    fields = ('Job name (e.g. val_090s):',)
-    msg = 'Available jobs:\n' + job_list + '\n\nEnter the job name to build:'
-    values = getInputs(fields, msg, dialogTitle='Build Model')
-    return values
+    prompt = 'Available jobs:\n' + job_list + '\n\nEnter the job name to build:'
+    value = getInput(prompt, 'Job name (e.g. val_090s)')
+    return value
 
 
 def main():
@@ -58,12 +57,12 @@ def main():
     print()
 
     # Show dialog
-    values = _show_dialog()
-    if not values or not values[0]:
+    value = _show_dialog()
+    if not value:
         print('Cancelled by user.')
         return
 
-    job_name = values[0].strip()
+    job_name = value.strip()
     job = config.get_job_by_name(job_name)
     if job is None:
         print('ERROR: job "%s" not found in config.JOBS' % job_name)
