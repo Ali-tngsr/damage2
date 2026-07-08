@@ -54,39 +54,52 @@ def setup_assembly_and_run(L=70.0, total_thickness=1.0, applied_strain=0.025,
     if skip_if_exists and INSTANCE_NAME in assembly.instances.keys():
         print('Assembly already exists (resume mode) — Intercepting and fixing manual cohesive elements...')
 
-        part_name = 'Specimen_Orphan' if 'Specimen_Orphan' in model.parts.keys() else 'Specimen'
-        p = model.parts[part_name]
-
-        # Automatically fix Element Type and Section Assignment for manually inserted seams
-        if 'CohesiveSeam-1-Elements' in p.sets.keys():
-            import mesh
-            coh_set = p.sets['CohesiveSeam-1-Elements']
-
-            # 1. Force Element Type to COH2D4 (Standard Mechanical Library)
-            elemType = mesh.ElemType(elemCode=COH2D4, elemLibrary=STANDARD)
-            try:
-                p.setElementType(regions=(coh_set,), elemTypes=(elemType,))
-                print('  Element type forced to COH2D4.')
-            except Exception as e:
-                print('  WARNING: setElementType failed: %s' % e)
-
-            # 2. Assign Cohesive Section (try with optional kwargs first, fall back to minimal)
-            try:
-                p.SectionAssignment(region=coh_set, sectionName='Cohesive_Sec',
-                                    offset=0.0, offsetType=MIDDLE_SURFACE,
-                                    offsetField='', thicknessAssignment=FROM_SECTION)
-                print('  Section assigned with full kwargs.')
-            except (TypeError, Exception):
-                try:
-                    p.SectionAssignment(region=coh_set, sectionName='Cohesive_Sec')
-                    print('  Section assigned with minimal kwargs.')
-                except Exception as e:
-                    print('  WARNING: SectionAssignment failed: %s' % e)
-                    print('  You may need to assign Cohesive_Sec manually in Property module.')
-
-            print('SUCCESS: CohesiveSeam-1-Elements processed.')
+        # Prefer Specimen (with geometry) over Specimen_Orphan, because
+        # the Insert cohesive seams tool works on geometric edge sets,
+        # which only exist on Specimen (not on orphan mesh).
+        if 'Specimen' in model.parts.keys():
+            part_name = 'Specimen'
+        elif 'Specimen_Orphan' in model.parts.keys():
+            part_name = 'Specimen_Orphan'
         else:
-            print('WARNING: CohesiveSeam-1-Elements set not found in part!')
+            part_name = None
+            print('  ERROR: Neither Specimen nor Specimen_Orphan found in model!')
+
+        if part_name:
+            p = model.parts[part_name]
+            print('  Using part: %s' % part_name)
+
+            # Automatically fix Element Type and Section Assignment for manually inserted seams
+            if 'CohesiveSeam-1-Elements' in p.sets.keys():
+                import mesh
+                coh_set = p.sets['CohesiveSeam-1-Elements']
+
+                # 1. Force Element Type to COH2D4 (Standard Mechanical Library)
+                elemType = mesh.ElemType(elemCode=COH2D4, elemLibrary=STANDARD)
+                try:
+                    p.setElementType(regions=(coh_set,), elemTypes=(elemType,))
+                    print('  Element type forced to COH2D4.')
+                except Exception as e:
+                    print('  WARNING: setElementType failed: %s' % e)
+
+                # 2. Assign Cohesive Section (try with optional kwargs first, fall back to minimal)
+                try:
+                    p.SectionAssignment(region=coh_set, sectionName='Cohesive_Sec',
+                                        offset=0.0, offsetType=MIDDLE_SURFACE,
+                                        offsetField='', thicknessAssignment=FROM_SECTION)
+                    print('  Section assigned with full kwargs.')
+                except (TypeError, Exception):
+                    try:
+                        p.SectionAssignment(region=coh_set, sectionName='Cohesive_Sec')
+                        print('  Section assigned with minimal kwargs.')
+                    except Exception as e:
+                        print('  WARNING: SectionAssignment failed: %s' % e)
+                        print('  You may need to assign Cohesive_Sec manually in Property module.')
+
+                print('SUCCESS: CohesiveSeam-1-Elements processed.')
+            else:
+                print('WARNING: CohesiveSeam-1-Elements set not found in part %s!' % part_name)
+                print('  Did you run Insert cohesive seams on the Specimen part?')
 
         if job_name not in mdb.jobs.keys():
             mdb.Job(name=job_name, model=MODEL_NAME,
@@ -97,11 +110,17 @@ def setup_assembly_and_run(L=70.0, total_thickness=1.0, applied_strain=0.025,
 
     assembly.DatumCsysByDefault(CARTESIAN)
 
-    # Prefer orphan mesh if it exists (created by OrphanMesh.make_orphan_mesh).
-    # In manual mode, the user may have also added cohesive elements directly
-    # to the orphan mesh part.
-    part_name = 'Specimen_Orphan' if 'Specimen_Orphan' in model.parts.keys() else 'Specimen'
+    # Prefer Specimen (with geometry) over Specimen_Orphan, because
+    # the Insert cohesive seams tool works on geometric edge sets,
+    # which only exist on Specimen (not on orphan mesh).
+    if 'Specimen' in model.parts.keys():
+        part_name = 'Specimen'
+    elif 'Specimen_Orphan' in model.parts.keys():
+        part_name = 'Specimen_Orphan'
+    else:
+        raise RuntimeError('Neither Specimen nor Specimen_Orphan found in model!')
     part = model.parts[part_name]
+    print('Using part for assembly: %s' % part_name)
 
     # === اعمال جهت‌گیری سراسری متریال روی المان‌های شبکه مستقل ===
     # NOTE: this orientation applies to orphan-mesh elements (not faces).
