@@ -425,34 +425,68 @@ def extract_results(odb_path, output_csv=None, job_name=None,
                     frame_idx + 1, n_frames, strain_pct, sigma90_vol, crack_count))
 
         # ---- Compute normalized stiffness E90/E90° for each frame ----
+        # Use SECANT stiffness: E90(ε) = σ90(ε) / ε
+        # This is more stable than tangent (dσ/dε) which becomes
+        # oscillatory after crack onset.
+        # E90_initial = secant stiffness at first non-zero frame (before cracks).
+
+        # Find E90_initial from the first few frames (linear elastic region)
+        # Use linear regression on (strain, sigma90) for the first 3-5 frames
+        # where strain > 0.001 (avoid zero) and before crack onset.
         if E90_initial is None and len(rows) > 1:
-            # Fallback: use secant stiffness between first two frames
-            r0, r1 = rows[0], rows[1]
-            d_eps = r1['strain'] - r0['strain']
-            d_sig = r1['sigma90_volumetric_mpa'] - r0['sigma90_volumetric_mpa']
-            if d_eps > 0:
-                E90_initial = d_sig / d_eps
+            # Collect points from linear elastic region (first ~5 frames or
+            # up to 0.1% strain, whichever is smaller)
+            elastic_points = []
+            for r in rows:
+                if r['strain'] > 0.0005 and r['strain'] < 0.005 and \
+                   r['sigma90_volumetric_mpa'] > 0:
+                    elastic_points.append((r['strain'], r['sigma90_volumetric_mpa']))
+                    if len(elastic_points) >= 5:
+                        break
+
+            if len(elastic_points) >= 2:
+                # Linear regression: sigma = E * strain + b
+                n = len(elastic_points)
+                sum_x = sum(p[0] for p in elastic_points)
+                sum_y = sum(p[1] for p in elastic_points)
+                sum_xy = sum(p[0] * p[1] for p in elastic_points)
+                sum_x2 = sum(p[0] * p[0] for p in elastic_points)
+                denom = n * sum_x2 - sum_x * sum_x
+                if abs(denom) > 1e-15:
+                    E90_initial = (n * sum_xy - sum_x * sum_y) / denom
+                else:
+                    # Fallback: simple ratio from first point
+                    E90_initial = elastic_points[0][1] / elastic_points[0][0]
+            else:
+                # Fallback: use first non-zero point
+                for r in rows:
+                    if r['strain'] > 0.0005 and r['sigma90_volumetric_mpa'] > 0:
+                        E90_initial = r['sigma90_volumetric_mpa'] / r['strain']
+                        break
+
+        # Fallback: if still None, use any non-zero point
+        if E90_initial is None or E90_initial <= 0:
+            for r in rows:
+                if r['strain'] > 0 and r['sigma90_volumetric_mpa'] > 0:
+                    E90_initial = r['sigma90_volumetric_mpa'] / r['strain']
+                    break
+
+        if E90_initial is None or E90_initial <= 0:
+            E90_initial = 1000.0  # last resort fallback
+            print('  WARNING: Could not determine E90_initial, using 1000 MPa')
 
         print('-' * 70)
-        print('  Initial E90 (secant, ε<0.5%%): %.3f MPa' % (E90_initial or 0.0))
+        print('  Initial E90 (secant, linear regression): %.3f MPa' % E90_initial)
 
-        # Compute normalized stiffness via numerical differentiation
-        # E90(ε) = dσ90/dε at each frame (using central difference)
+        # Compute normalized secant stiffness for each frame
+        # E90_norm(ε) = [σ90(ε) / ε] / E90_initial
+        # This should start at 1.0 and decrease as cracks form.
         for i, row in enumerate(rows):
-            if i == 0:
-                d_eps = rows[1]['strain'] - rows[0]['strain']
-                d_sig = rows[1]['sigma90_volumetric_mpa'] - rows[0]['sigma90_volumetric_mpa']
-            elif i == len(rows) - 1:
-                d_eps = rows[i]['strain'] - rows[i - 1]['strain']
-                d_sig = rows[i]['sigma90_volumetric_mpa'] - rows[i - 1]['sigma90_volumetric_mpa']
+            if row['strain'] > 0 and E90_initial > 0:
+                secant_stiffness = row['sigma90_volumetric_mpa'] / row['strain']
+                row['E90_normalized'] = secant_stiffness / E90_initial
             else:
-                d_eps = rows[i + 1]['strain'] - rows[i - 1]['strain']
-                d_sig = rows[i + 1]['sigma90_volumetric_mpa'] - rows[i - 1]['sigma90_volumetric_mpa']
-
-            if d_eps > 0 and E90_initial and E90_initial > 0:
-                E90_tangent = d_sig / d_eps
-                row['E90_normalized'] = E90_tangent / E90_initial
-            else:
+                # First frame (strain=0): set to 1.0 (undamaged)
                 row['E90_normalized'] = 1.0
 
             # Clamp to [0, 1.2] for plotting sanity
