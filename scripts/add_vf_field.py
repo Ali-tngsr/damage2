@@ -194,8 +194,12 @@ def add_vf_field(odb_path):
                     print('  ERROR creating FieldOutput: %s' % e)
                     continue
 
-                # Add values for each element using bulk addData
-                # Build parallel arrays of labels and data
+                # Add values for each element
+                # Abaqus FieldOutput.addData expects 2D arrays for labels and data
+                # For SCALAR field: each element has 1 component
+                # labels: 2D array of shape (n_elements, 1) — one label per element
+                # data:   2D array of shape (n_elements, 1) — one value per element
+
                 labels_list = []
                 data_list = []
                 for elem in instance.elements:
@@ -203,30 +207,70 @@ def add_vf_field(odb_path):
                     labels_list.append(elem.label)
                     data_list.append(vf)
 
+                added = 0
+                # Method 1: Try bulk addData with 2D arrays
                 try:
+                    # Build 2D tuples: ((label1,), (label2,), ...) and ((vf1,), (vf2,), ...)
+                    labels_2d = tuple((label,) for label in labels_list)
+                    data_2d = tuple((vf,) for vf in data_list)
                     vf_field.addData(
                         position=CENTROID,
                         instance=instance,
-                        labels=tuple(labels_list),
-                        data=tuple(data_list))
-                    print('  Step %s frame 0: added %d VF values (bulk)' % (
-                        step_name, len(labels_list)))
+                        labels=labels_2d,
+                        data=data_2d)
+                    added = len(labels_list)
+                    print('  Step %s frame 0: added %d VF values (2D bulk)' % (
+                        step_name, added))
                 except Exception as e1:
-                    print('  Bulk addData failed: %s' % e1)
-                    # Fallback: add per element
-                    added = 0
-                    for i, label in enumerate(labels_list):
-                        try:
+                    print('  2D bulk addData failed: %s' % e1)
+
+                    # Method 2: Try per-element with 2D format
+                    try:
+                        for i, label in enumerate(labels_list):
                             vf_field.addData(
                                 position=CENTROID,
                                 instance=instance,
-                                labels=(label,),
-                                data=(data_list[i],))
+                                labels=((label,),),
+                                data=((data_list[i],),))
                             added += 1
-                        except Exception:
-                            pass
-                    print('  Step %s frame 0: added %d VF values (per-element)' % (
-                        step_name, added))
+                        print('  Step %s frame 0: added %d VF values (2D per-element)' % (
+                            step_name, added))
+                    except Exception as e2:
+                        print('  2D per-element failed: %s' % e2)
+
+                        # Method 3: Try with numpy arrays
+                        try:
+                            import numpy as np
+                            labels_np = np.array(labels_list, dtype=int).reshape(-1, 1)
+                            data_np = np.array(data_list, dtype=float).reshape(-1, 1)
+                            vf_field.addData(
+                                position=CENTROID,
+                                instance=instance,
+                                labels=labels_np,
+                                data=data_np)
+                            added = len(labels_list)
+                            print('  Step %s frame 0: added %d VF values (numpy 2D)' % (
+                                step_name, added))
+                        except Exception as e3:
+                            print('  numpy 2D failed: %s' % e3)
+
+                            # Method 4: Try single-element at a time with scalar data
+                            try:
+                                for i, label in enumerate(labels_list):
+                                    vf_field.addData(
+                                        position=CENTROID,
+                                        instance=instance,
+                                        labels=(label,),
+                                        data=(data_list[i],))
+                                    added += 1
+                                print('  Step %s frame 0: added %d VF values (1D per-element)' % (
+                                    step_name, added))
+                            except Exception as e4:
+                                print('  All addData methods failed!')
+                                print('  Last error: %s' % e4)
+
+                if added == 0:
+                    print('  WARNING: No VF values were added to the field!')
 
         # Save the ODB
         print('Saving ODB...')
