@@ -27,7 +27,7 @@ import part
 import mesh
 import regionToolset
 import logging
-
+import random
 # ============================================================
 # USER INPUTS - ویرایش این مقادیر
 # ============================================================
@@ -39,7 +39,7 @@ L_gauge = 70.0      # طول gauge [mm] (ناحیه قرارگیری cohesive co
 # --- ورودی‌های لایه (Ply inputs) ---
 t0 = 0.250          # ضخامت هر لایه 0° [mm]
 t90 = 0.250         # ضخامت هر لایه 90° [mm]
-n90 = 2             # تعداد لایه‌های 90°
+n90 = 1             # تعداد لایه‌های 90°
 
 # --- نوع لایه‌چینی (Layup type) ---
 # 'symmetric'  => [0/90n]s = 0 / 90*n / 90*n / 0
@@ -60,6 +60,26 @@ model_name = 'Laminate_Model'
 part_name = 'Laminate'
 
 
+
+# ============================================================
+# تنظیمات توزیع کسر حجمی (درصدی) و تعداد ست‌ها
+# ============================================================
+VF_LEVELS_initial = [0.0, 15.0, 30.0, 45.0, 60.0, 75.0, 90.0]
+
+TARGET_VF = 45.0           # میانگین درصدی الیاف که باید به دست بیاید
+NUM_MATERIAL_SETS = 10     # تعداد ست‌های متریال مورد نیاز (تولید بازه‌های مساوی بین 0 تا 90)
+
+# تولید لیست مقادیر Vf به صورت اتوماتیک
+VF_LEVELS = []
+if NUM_MATERIAL_SETS==7:
+    VF_LEVELS = VF_LEVELS_initial
+else:
+    if NUM_MATERIAL_SETS > 1:
+        step_vf = 90.0 / float(NUM_MATERIAL_SETS - 1)
+        for i in range(NUM_MATERIAL_SETS):
+            VF_LEVELS.append(i * step_vf)
+    else:
+        VF_LEVELS = [TARGET_VF]
 # ============================================================
 # COMPUTE LAYUP SEQUENCE
 # ============================================================
@@ -167,114 +187,90 @@ def create_base_geometry_2d(model_name, part_name, L, total_thickness):
 
 def partition_with_sketch(p, model, L, total_thickness, layup, n_cells_thickness,
                           L_gauge, rho):
-    """
-    پارتیشن‌بندی با استفاده از Sketch (روش اثبات‌شده).
-
-    این روش دقیقاً مثل build_mesoscale_model.py کار می‌کند:
-    1. ساخت horizontal sketch برای مرزهای لایه‌ها و زیرسلول‌های 90°
-    2. ساخت vertical sketch برای مسیرهای cohesive
-    3. استفاده از PartitionFaceBySketch
-    """
     print("")
-    print("--- Partitioning with Sketch method ---")
+    print("--- Partitioning with Sketch method (Square Elements, Entire Model) ---")
 
-    # محاسبه Y مرزهای لایه‌ها
     ply_y_boundaries = []
-    y_current = 0.0
-    for i in range(len(layup) - 1):
+    y_ranges_90 = []
+    y_start = 0.0
+    
+    for i in range(len(layup)):
         angle = layup[i][0]
         t = layup[i][1]
-        y_current += t
-        ply_y_boundaries.append(y_current)
+        y_end = y_start + t
+        if i < len(layup) - 1:
+            ply_y_boundaries.append(y_end)
+        if angle == 90:
+            y_ranges_90.append((y_start, y_end))
+        y_start = y_end
 
-    # محاسبه Y موقعیت‌های زیرسلول‌های 90°
     subcell_y = []
     y_start = 0.0
+    t90_sample = 0.0
     for item in layup:
         angle = item[0]
         t = item[1]
         y_end = y_start + t
         if angle == 90:
-            dy = t / n_cells_thickness
+            t90_sample = t
+            dy = t / float(n_cells_thickness)
             for j in range(1, n_cells_thickness):
                 subcell_y.append(y_start + j * dy)
         y_start = y_end
 
-    # محاسبه موقعیت‌های X برای cohesive columns
-    t90_total = 0.0
-    for item in layup:
-        if item[0] == 90:
-            t90_total += item[1]
-    n_cohesive = max(1, int(round(rho * t90_total / L_gauge)))
-
-    x_gauge_start = (L - L_gauge) / 2.0
-    dx = L_gauge / (n_cohesive + 1)
+    dy = t90_sample / float(n_cells_thickness)
+    dx = dy 
+    
+    # رسم خطوط عمودی برای **کل طول مدل** (از 0 تا L)
     cohesive_x = []
-    for i in range(n_cohesive):
-        cohesive_x.append(x_gauge_start + (i + 1) * dx)
+    current_x = 0.0
+    while True:
+        current_x += dx
+        if current_x >= L - 1e-5:
+            break
+        cohesive_x.append(current_x)
+        
+    n_cohesive = len(cohesive_x)
 
-    print("  Horizontal partition lines: {} ply + {} subcell = {}".format(
-        len(ply_y_boundaries), len(subcell_y), len(ply_y_boundaries) + len(subcell_y)))
-    print("  Vertical partition lines (cohesive): {}".format(len(cohesive_x)))
-
-    # ============================================================
-    # Stage 1: Horizontal sketch (ply boundaries + 90° sub-cells)
-    # ============================================================
+    # مرحله 1: پارتیشن‌های افقی
     print("  Creating horizontal sketch...")
-    horiz_sketch = model.ConstrainedSketch(
-        name='partition_horizontal',
-        sheetSize=200.0)
-
-    # خطوط مرز لایه‌ها
+    horiz_sketch = model.ConstrainedSketch(name='partition_horizontal', sheetSize=200.0)
     for y in ply_y_boundaries:
         horiz_sketch.Line(point1=(0.0, y), point2=(L, y))
-
-    # خطوط زیرسلول‌های 90°
     for y in subcell_y:
         horiz_sketch.Line(point1=(0.0, y), point2=(L, y))
-
-    # اعمال پارتیشن افقی
     p.PartitionFaceBySketch(faces=p.faces, sketch=horiz_sketch)
-    print("  [OK] Horizontal partitions applied")
 
-    # ============================================================
-    # Stage 2: Vertical sketch (cohesive column paths)
-    # ============================================================
-    print("  Creating vertical sketch...")
-    vert_sketch = model.ConstrainedSketch(
-        name='partition_vertical',
-        sheetSize=200.0)
-
+    # مرحله 2: پارتیشن‌های عمودی (فقط در لایه‌های 90 درجه)
+    print("  Creating vertical sketch (restricted to 90 deg plies)...")
+    vert_sketch = model.ConstrainedSketch(name='partition_vertical', sheetSize=200.0)
+    
     for x in cohesive_x:
-        vert_sketch.Line(point1=(x, 0.0), point2=(x, total_thickness))
-
-    # اعمال پارتیشن عمودی
-    p.PartitionFaceBySketch(faces=p.faces, sketch=vert_sketch)
-    print("  [OK] Vertical partitions applied")
+        vert_sketch.Line(point1=(x, -total_thickness), point2=(x, 2.0 * total_thickness))
+            
+    tol = 1e-4
+    for y_min, y_max in y_ranges_90:
+        faces_to_cut = p.faces.getByBoundingBox(
+            xMin=-tol, yMin=y_min-tol, zMin=-tol,
+            xMax=L+tol, yMax=y_max+tol, zMax=tol)
+        
+        if len(faces_to_cut) > 0:
+            p.PartitionFaceBySketch(faces=faces_to_cut, sketch=vert_sketch)
+            
+    print("  [OK] Vertical partitions applied to the entire length successfully")
 
     return n_cohesive
-
 
 # ============================================================
 # CREATE FACE SETS - استفاده از findAt و getByBoundingBox
 # ============================================================
 
 def create_face_sets(p, layup, L, n_cells_thickness):
-    """
-    ساخت setهای وجهی (face sets) برای لایه‌های 0° و 90°.
-
-    استفاده از روش اثبات‌شده:
-    - getByBoundingBox برای set‌های کلی (Ply_0_Set, Ply_90_Set)
-    - findAt با tuple 3D برای set‌های زیرسلول
-    """
     print("")
-    print("--- Stage 4: Creating face sets ---")
+    print("--- Stage 4: Creating face sets (Dynamic Stochastic Vf) ---")
 
-    # محاسبه Y-range لایه‌های 0° و 90°
-    y_min_0 = 1e10
-    y_max_0 = -1e10
-    y_min_90 = 1e10
-    y_max_90 = -1e10
+    y_min_0, y_max_0 = 1e10, -1e10
+    y_min_90, y_max_90 = 1e10, -1e10
 
     y_start = 0.0
     for item in layup:
@@ -291,112 +287,161 @@ def create_face_sets(p, layup, L, n_cells_thickness):
 
     tol = 1e-4
 
-    # ============================================================
-    # Ply_0_Set - استفاده از getByBoundingBox
-    # ============================================================
-    print("  Creating Ply_0_Set...")
-    try:
-        faces_0 = p.faces.getByBoundingBox(
-            xMin=-tol,
-            yMin=y_min_0 - tol,
-            zMin=-tol,
-            xMax=L + tol,
-            yMax=y_max_0 + tol,
-            zMax=tol)
-        if len(faces_0) > 0:
-            p.Set(faces=faces_0, name='Ply_0_Set')
-            print("  [OK] Created 'Ply_0_Set' with {} faces".format(len(faces_0)))
-        else:
-            print("  WARNING: No 0° faces found")
-    except Exception as e:
-        print("  WARNING: getByBoundingBox failed for 0°: {}".format(e))
+    faces_0 = []
 
-    # ============================================================
-    # Ply_90_Set - استفاده از getByBoundingBox
-    # ============================================================
-    print("  Creating Ply_90_Set...")
-    try:
-        faces_90 = p.faces.getByBoundingBox(
-            xMin=-tol,
-            yMin=y_min_90 - tol,
-            zMin=-tol,
-            xMax=L + tol,
-            yMax=y_max_90 + tol,
-            zMax=tol)
-        if len(faces_90) > 0:
-            p.Set(faces=faces_90, name='Ply_90_Set')
-            print("  [OK] Created 'Ply_90_Set' with {} faces".format(len(faces_90)))
-        else:
-            print("  WARNING: No 90° faces found")
-    except Exception as e:
-        print("  WARNING: getByBoundingBox failed for 90°: {}".format(e))
-
-    # ============================================================
-    # Sub-cell sets - استفاده از findAt با tuple 3D
-    # ============================================================
-    print("")
-    print("  Creating sub-cell sets for stochastic Vf assignment:")
-
-    # محاسبه Y-boundaries و dx برای هر زیرسلول
     y_start = 0.0
-    cell_counter = 0
 
+    for angle, t in layup:
+
+        y_end = y_start + t
+
+        if angle == 0:
+
+            y_mid = 0.5 * (y_start + y_end)
+
+            try:
+                f = p.faces.findAt(((L * 0.5, y_mid, 0.0),))
+
+                if f not in faces_0:
+                    faces_0.append(f)
+
+            except:
+                pass
+
+        y_start = y_end
+
+    if len(faces_0) > 0:
+        p.Set(faces=faces_0, name='Ply_0_Set')
+
+    # ============================================================
+    # تخصیص استوکستیک متریال‌ها برای کل طول مدل
+    # ============================================================
+    faces_by_mat = {i: [] for i in range(len(VF_LEVELS))}
+    all_cells_data = []
+
+    # محاسبه مرزهای X برای تمام طول مدل
+    dy = 0.0
+    for item in layup:
+        if item[0] == 90:
+            dy = item[1] / float(n_cells_thickness)
+            break
+    dx = dy
+
+    x_bounds = [0.0]
+    current_x = 0.0
+    while True:
+        current_x += dx
+        if current_x >= L - 1e-5:
+            break
+        x_bounds.append(current_x)
+    x_bounds.append(L)
+
+    x_centers = []
+    for k in range(len(x_bounds) - 1):
+        x_centers.append((x_bounds[k] + x_bounds[k+1]) / 2.0)
+
+    y_start = 0.0
     for ply_idx, item in enumerate(layup):
         angle = item[0]
         t = item[1]
         y_end = y_start + t
 
         if angle == 90:
-            dy = t / n_cells_thickness
-
-            # محاسبه n_cols بر اساس gauge length
-            # (استفاده از همان rho و L_gauge)
-            t90_total = 0.0
-            for it in layup:
-                if it[0] == 90:
-                    t90_total += it[1]
-            n_cohesive = max(1, int(round(rho * t90_total / L_gauge)))
-            dx = L_gauge / (n_cohesive + 1)
-            x_gauge_start = (L - L_gauge) / 2.0
-
+            y_mid_ply = y_start + (t / 2.0)
             for j in range(n_cells_thickness):
                 y_cell_center = y_start + (j + 0.5) * dy
-
-                for i in range(n_cohesive):
-                    x_cell_center = x_gauge_start + (i + 0.5) * dx
-                    cell_counter += 1
-                    set_name = 'Cell_90_{:03d}'.format(cell_counter)
-
-                    # استفاده از findAt با tuple 3D (مثل build_mesoscale_model.py)
-                    try:
-                        face_obj = p.faces.findAt(((x_cell_center, y_cell_center, 0.0),))
-                        if face_obj is not None:
-                            p.Set(faces=(face_obj,), name=set_name)
-                    except Exception as e:
-                        if cell_counter == 1:
-                            print("  Note: findAt failed for first cell: {}".format(e))
+                normalized_dist = abs(y_cell_center - y_mid_ply) / (t / 2.0)
+                deterministic_score = (1.0 - (normalized_dist ** 2)) * 90.0
+                
+                for x_cell_center in x_centers:
+                    noise = random.uniform(-15.0, 15.0)
+                    raw_score = deterministic_score + noise
+                    
+                    all_cells_data.append({
+                        'x': x_cell_center,
+                        'y': y_cell_center,
+                        'score': raw_score
+                    })
 
         y_start = y_end
 
-    print("  [OK] Created {} individual face sets (Cell_90_001 to Cell_90_{:03d})".format(
-        cell_counter, cell_counter))
+    # اعمال میانگین کل
+    mean_score = sum([cell['score'] for cell in all_cells_data]) / float(len(all_cells_data))
+    
+    for cell in all_cells_data:
+        shifted_vf = cell['score'] - mean_score + TARGET_VF
+        shifted_vf = max(0.0, min(90.0, shifted_vf))
+        
+        best_idx = 0
+        min_diff = 1000.0
+        for idx, vf_val in enumerate(VF_LEVELS):
+            diff = abs(shifted_vf - vf_val)
+            if diff < min_diff:
+                min_diff = diff
+                best_idx = idx
+                
+        try:
+            face_obj = p.faces.findAt(((cell['x'], cell['y'], 0.0),))
+            if face_obj is not None:
+                faces_by_mat[best_idx].append(face_obj)
+        except: pass
+
+    # ایجاد ست‌ها در آباکوس (نام‌ها تا دو رقم اعشار با _ جدا می‌شوند تا دقیق باشند)
+    for idx, vf_val in enumerate(VF_LEVELS):
+        face_list = faces_by_mat[idx]
+        if len(face_list) > 0:
+            # مثال خروجی: Set_90deg_Vf_14_50
+            str_vf = "{:.2f}".format(vf_val).replace('.', '_')
+            set_name = 'Set_90deg_Vf_{}'.format(str_vf)
+            p.Set(faces=face_list, name=set_name)
+            print("  [OK] Created {} with {} cells".format(set_name, len(face_list)))
 
     # ============================================================
-    # Potential_Crack_Edges set - برای استفاده در Insert cohesive seams
+    # ساخت ست لبه‌های ترک (تنها محدود به ناحیه Gauge)
     # ============================================================
     print("")
     print("  Creating Potential_Crack_Edges set...")
 
-    # محاسبه موقعیت‌های cohesive برای findAt روی edges
-    t90_total = 0.0
-    for item in layup:
-        if item[0] == 90:
-            t90_total += item[1]
-    n_cohesive = max(1, int(round(rho * t90_total / L_gauge)))
-    dx = L_gauge / (n_cohesive + 1)
     x_gauge_start = (L - L_gauge) / 2.0
+    x_gauge_end = x_gauge_start + L_gauge
+    
+    # فیلتر کردن خطوط عمودی که فقط داخل محدوده گیج هستند
+    ##########
+    # -----------------------------------------------
+    # Select only the required crack edges
+    # -----------------------------------------------
 
-    # محاسبه Y-range لایه‌های 90°
+    # تمام مرزهای سلول داخل ناحیه Gauge
+    candidate_edges = [
+        x for x in x_bounds
+        if (x_gauge_start - 1e-5) <= x <= (x_gauge_end + 1e-5)
+    ]
+
+    # ضخامت کل لایه‌های 90
+    t90_total = 0.0
+    for angle, t in layup:
+        if angle == 90:
+            t90_total += t
+
+    # تعداد ترک از رابطه مقاله
+    n_cracks = int(round(rho * t90_total * L))     # <-- اگر رابطه مقاله متفاوت است فقط همین خط را عوض کن
+
+    # بیشتر از تعداد مرزهای موجود نشود
+    n_cracks = min(n_cracks, len(candidate_edges))
+
+    crack_x_positions = []
+
+    if n_cracks > 0:
+
+        # انتخاب یکنواخت از بین مرزهای سلول
+        if n_cracks == 1:
+            crack_x_positions.append(candidate_edges[len(candidate_edges)//2])
+        else:
+            for i in range(n_cracks):
+                idx = int(round(i * (len(candidate_edges)-1) / float(n_cracks-1)))
+                crack_x_positions.append(candidate_edges[idx])
+    #########
+
     y_ranges_90 = []
     y_start = 0.0
     for item in layup:
@@ -407,10 +452,8 @@ def create_face_sets(p, layup, L, n_cells_thickness):
             y_ranges_90.append((y_start, y_end))
         y_start = y_end
 
-    # پیدا کردن edges با findAt
     crack_edge_points = []
-    for i in range(n_cohesive):
-        x_pos = x_gauge_start + (i + 1) * dx
+    for x_pos in crack_x_positions:
         for y_range in y_ranges_90:
             y_mid = (y_range[0] + y_range[1]) / 2.0
             crack_edge_points.append(((x_pos, y_mid, 0.0),))
@@ -419,26 +462,8 @@ def create_face_sets(p, layup, L, n_cells_thickness):
         try:
             crack_edges = p.edges.findAt(*crack_edge_points)
             p.Set(edges=crack_edges, name='Potential_Crack_Edges')
-            print("  [OK] Created 'Potential_Crack_Edges' with {} edges".format(
-                len(crack_edge_points)))
-        except Exception as e:
-            print("  WARNING: findAt failed for crack edges: {}".format(e))
-            # Fallback: استفاده از getByBoundingBox برای کل 90° region
-            try:
-                tol2 = 1e-4
-                crack_edges = p.edges.getByBoundingBox(
-                    xMin=x_gauge_start - tol2,
-                    yMin=y_min_90 - tol2,
-                    zMin=-tol2,
-                    xMax=x_gauge_start + L_gauge + tol2,
-                    yMax=y_max_90 + tol2,
-                    zMax=tol2)
-                if len(crack_edges) > 0:
-                    p.Set(edges=crack_edges, name='Potential_Crack_Edges')
-                    print("  [OK] Created 'Potential_Crack_Edges' via getByBoundingBox")
-            except Exception as e2:
-                print("  WARNING: getByBoundingBox also failed: {}".format(e2))
-
+            print("  [OK] Created 'Potential_Crack_Edges' with {} edges".format(len(crack_edge_points)))
+        except: pass
 
 # ============================================================
 # PRINT FINAL SUMMARY
@@ -543,6 +568,4 @@ def main():
 # ============================================================
 
 if __name__ == '__main__':
-    main()
-else:
     main()
