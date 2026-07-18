@@ -28,6 +28,29 @@ import mesh
 import regionToolset
 import logging
 import random
+import os
+import sys
+import inspect
+
+try:
+    SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+except NameError:
+    SCRIPT_DIR = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
+if SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, SCRIPT_DIR)
+
+from laminate_partitioning_core import (
+    build_layup as core_build_layup,
+    ply_ranges,
+    total_90_thickness,
+    ninety_subcell_size,
+    partition_x_bounds,
+    crack_count_from_density,
+    gauge_candidate_boundaries,
+    uniform_sample,
+    crack_edge_find_points,
+    coverage_percent,
+)
 # ============================================================
 # USER INPUTS - ویرایش این مقادیر
 # ============================================================
@@ -53,7 +76,7 @@ analysis_type = 'PLANE_STRAIN'
 
 # --- پارامترهای Stochastic ---
 n_cells_thickness = 5    # تعداد زیرسلول‌های هر لایه 90° در ضخامت
-rho = 0.5                # چگالی اشباع ترک [cracks/mm]
+rho = 0.5                # normalized crack saturation rho=N*L/t90 [-]
 
 # --- تنظیمات مدل ---
 model_name = 'Laminate_Model'
@@ -218,18 +241,15 @@ def partition_with_sketch(p, model, L, total_thickness, layup, n_cells_thickness
                 subcell_y.append(y_start + j * dy)
         y_start = y_end
 
-    dy = t90_sample / float(n_cells_thickness)
-    dx = dy 
-    
-    # رسم خطوط عمودی برای **کل طول مدل** (از 0 تا L)
-    cohesive_x = []
-    current_x = 0.0
-    while True:
-        current_x += dx
-        if current_x >= L - 1e-5:
-            break
-        cohesive_x.append(current_x)
-        
+    dy = ninety_subcell_size(layup, n_cells_thickness)
+    dx = dy
+
+    # Build a regular rectangular grid.  The x pitch equals the 90-ply
+    # through-thickness subcell size, so stochastic cells in the target plies
+    # are square and independent of crack spacing.
+    x_bounds = partition_x_bounds(L, dx)
+    cohesive_x = x_bounds[1:-1]
+
     n_cohesive = len(cohesive_x)
 
     # مرحله 1: پارتیشن‌های افقی
@@ -319,22 +339,11 @@ def create_face_sets(p, layup, L, n_cells_thickness):
     faces_by_mat = {i: [] for i in range(len(VF_LEVELS))}
     all_cells_data = []
 
-    # محاسبه مرزهای X برای تمام طول مدل
-    dy = 0.0
-    for item in layup:
-        if item[0] == 90:
-            dy = item[1] / float(n_cells_thickness)
-            break
+    # محاسبه مرزهای X برای تمام طول مدل.  This must match the partition
+    # grid exactly; crack positions are sampled from these existing boundaries.
+    dy = ninety_subcell_size(layup, n_cells_thickness)
     dx = dy
-
-    x_bounds = [0.0]
-    current_x = 0.0
-    while True:
-        current_x += dx
-        if current_x >= L - 1e-5:
-            break
-        x_bounds.append(current_x)
-    x_bounds.append(L)
+    x_bounds = partition_x_bounds(L, dx)
 
     x_centers = []
     for k in range(len(x_bounds) - 1):
@@ -411,59 +420,43 @@ def create_face_sets(p, layup, L, n_cells_thickness):
     # Select only the required crack edges
     # -----------------------------------------------
 
-    # تمام مرزهای سلول داخل ناحیه Gauge
-    candidate_edges = [
-        x for x in x_bounds
-        if (x_gauge_start - 1e-5) <= x <= (x_gauge_end + 1e-5)
-    ]
+    # تمام مرزهای سلول داخل ناحیه Gauge.  End boundaries of the whole part are
+    # excluded because cohesive seams must be internal crack paths.
+    candidate_edges = gauge_candidate_boundaries(x_bounds, L, L_gauge, include_ends=False)
 
-    # ضخامت کل لایه‌های 90
-    t90_total = 0.0
-    for angle, t in layup:
-        if angle == 90:
-            t90_total += t
-
-    # تعداد ترک از رابطه مقاله
-    n_cracks = int(round(rho * t90_total * L))     # <-- اگر رابطه مقاله متفاوت است فقط همین خط را عوض کن
+    # Crack-density convention: the paper/reference reports a normalized
+    # saturation value rho = N*L/t90, so N = rho*t90/L.  This is dimensionless;
+    # if rho is instead a physical density [cracks/mm], use N=rho*L.
+    t90_total = total_90_thickness(layup)
+    n_cracks, n_cracks_raw = crack_count_from_density(
+        rho, t90_total, L_gauge, rounding='nearest', minimum=1)
 
     # بیشتر از تعداد مرزهای موجود نشود
     n_cracks = min(n_cracks, len(candidate_edges))
+    crack_x_positions = uniform_sample(candidate_edges, n_cracks)
 
-    crack_x_positions = []
+    crack_edge_points = crack_edge_find_points(crack_x_positions, layup, n_cells_thickness)
+    expected_segments = len(crack_x_positions) * len(ply_ranges(layup, 90)) * int(n_cells_thickness)
 
-    if n_cracks > 0:
-
-        # انتخاب یکنواخت از بین مرزهای سلول
-        if n_cracks == 1:
-            crack_x_positions.append(candidate_edges[len(candidate_edges)//2])
-        else:
-            for i in range(n_cracks):
-                idx = int(round(i * (len(candidate_edges)-1) / float(n_cracks-1)))
-                crack_x_positions.append(candidate_edges[idx])
-    #########
-
-    y_ranges_90 = []
-    y_start = 0.0
-    for item in layup:
-        angle = item[0]
-        t = item[1]
-        y_end = y_start + t
-        if angle == 90:
-            y_ranges_90.append((y_start, y_end))
-        y_start = y_end
-
-    crack_edge_points = []
-    for x_pos in crack_x_positions:
-        for y_range in y_ranges_90:
-            y_mid = (y_range[0] + y_range[1]) / 2.0
-            crack_edge_points.append(((x_pos, y_mid, 0.0),))
+    print("  Number of cracks: {} (raw={:.6f})".format(n_cracks, n_cracks_raw))
+    print("  90 ply total thickness: {:.6f} mm".format(t90_total))
+    print("  Crack positions: {}".format([round(x, 6) for x in crack_x_positions]))
 
     if len(crack_edge_points) > 0:
         try:
             crack_edges = p.edges.findAt(*crack_edge_points)
             p.Set(edges=crack_edges, name='Potential_Crack_Edges')
-            print("  [OK] Created 'Potential_Crack_Edges' with {} edges".format(len(crack_edge_points)))
-        except: pass
+            selected = len(crack_edges)
+            coverage = coverage_percent(selected, expected_segments)
+            print("  [OK] Created 'Potential_Crack_Edges' with {} edges".format(selected))
+            print("  Crack-set thickness coverage = {:.1f}% ({} / {} segments)".format(
+                coverage, selected, expected_segments))
+            if selected != expected_segments:
+                print("  WARNING: crack edge selection is incomplete; check partition tolerance/geometry")
+        except Exception as err:
+            print("  ERROR: failed to create Potential_Crack_Edges: {}".format(err))
+    else:
+        print("  WARNING: no crack edges requested/available in gauge section")
 
 # ============================================================
 # PRINT FINAL SUMMARY
@@ -532,7 +525,7 @@ def main():
     print("#" * 70)
 
     # مرحله 0: ساخت لایه‌چینی
-    layup = build_layup(layup_type, n90, t0, t90)
+    layup = core_build_layup(layup_type, n90, t0, t90)
     print_layup_info(layup, t0, t90, n90, layup_type)
 
     # محاسبه ضخامت کل
