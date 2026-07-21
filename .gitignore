@@ -1,0 +1,39 @@
+# Abaqus job artifacts (large binary files)
+abaqus_jobs/*
+!abaqus_jobs/.gitkeep
+
+# Generated results (CSV / PNG / ODB)
+results/*
+!results/.gitkeep
+
+# Note: data/table1_transcribed.csv is committed (sanity-check artifact)
+#       but results/vf_field_preview.csv is gitignored (regenerable)
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Abaqus scratch files
+*.odb
+*.cae
+*.inp
+*.dat
+*.msg
+*.sta
+*.prt
+*.sim
+*.com
+*.prt
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+*.swp
+*.swo
+.vscode/
+.idea/
